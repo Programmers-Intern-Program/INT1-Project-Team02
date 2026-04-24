@@ -9,5 +9,4 @@ public class FlodiBackApplication {
     public static void main(String[] args) {
         SpringApplication.run(FlodiBackApplication.class, args);
     }
-
 }

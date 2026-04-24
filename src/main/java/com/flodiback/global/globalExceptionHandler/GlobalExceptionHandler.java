@@ -1,0 +1,88 @@
+package com.flodiback.global.globalExceptionHandler;
+
+import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
+
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+
+import com.flodiback.global.exception.ServiceException;
+import com.flodiback.global.rsData.RsData;
+
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    // 1. 데이터가 없을 때 (404)
+    @ExceptionHandler(NoSuchElementException.class)
+    public ResponseEntity<RsData<Void>> handle(NoSuchElementException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(RsData.of("404-1", "해당 데이터가 존재하지 않습니다."));
+    }
+
+    // 2. 제약 조건 위반 (주로 파라미터 유효성 검사 실패)
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<RsData<Void>> handle(ConstraintViolationException ex) {
+        String message = ex.getConstraintViolations().stream()
+                .map(violation -> {
+                    String path = violation.getPropertyPath().toString();
+                    String field = path.contains(".") ? path.substring(path.lastIndexOf(".") + 1) : path;
+
+                    String template = violation.getMessageTemplate();
+                    String[] bits = template.split("\\.");
+                    String code = (bits.length >= 2) ? bits[bits.length - 2] : "Unknown";
+
+                    return String.format("%s-%s-%s", field, code, violation.getMessage());
+                })
+                .sorted()
+                .collect(Collectors.joining("\n"));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(RsData.of("400-1", message));
+    }
+
+    // 3. @Valid 검증 실패 (DTO 유효성 검사 실패)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<RsData<Void>> handle(MethodArgumentNotValidException ex) {
+        String message = ex.getBindingResult().getAllErrors().stream()
+                .filter(FieldError.class::isInstance)
+                .map(FieldError.class::cast)
+                .map(err -> String.format("%s-%s-%s", err.getField(), err.getCode(), err.getDefaultMessage()))
+                .sorted()
+                .collect(Collectors.joining("\n"));
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(RsData.of("400-1", message));
+    }
+
+    // 4. JSON 파싱 에러 (잘못된 형식의 JSON 요청)
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<RsData<Void>> handle(HttpMessageNotReadableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(RsData.of("400-1", "요청 본문이 올바르지 않습니다."));
+    }
+
+    // 5. 필수 헤더 누락
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<RsData<Void>> handle(MissingRequestHeaderException ex) {
+        String message = String.format("%s-%s-%s", ex.getHeaderName(), "NotBlank", ex.getLocalizedMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(RsData.of("400-1", message));
+    }
+
+    // 6. 우리가 직접 만든 커스텀 예외 (ServiceException)
+    @ExceptionHandler(ServiceException.class)
+    public ResponseEntity<RsData<Void>> handle(ServiceException ex) {
+        RsData<Void> rsData = ex.getRsData();
+        return ResponseEntity.status(rsData.statusCode()).body(rsData);
+    }
+
+    // 7. 비관적 락 타임아웃 (joinRoom 동시 요청 과부하 시)
+    //    락 대기 1초 초과 시 발생. 500 대신 409로 명확한 의미 전달.
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<RsData<Void>> handle(PessimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(RsData.of("409-1", "현재 입장 처리 중입니다. 잠시 후 다시 시도해 주세요."));
+    }
+}
