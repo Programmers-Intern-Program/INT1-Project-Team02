@@ -8,6 +8,8 @@ REPORT_PATH="docs/generated/doc-gardening-report.md"
 STALE_DAYS="${STALE_DAYS:-14}"
 NOW_EPOCH="$(date +%s)"
 TODAY="$(date +%F)"
+active_pattern='^docs/exec-plans/active/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[^/]+-[^/]+\.md$'
+completed_pattern='^docs/exec-plans/completed/[0-9]{4}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[^/]+-[^/]+\.md$'
 
 parse_epoch() {
   local date_str="$1"
@@ -45,10 +47,17 @@ done
 active_count=0
 stale_count=0
 stale_entries=()
+invalid_active_entries=()
+invalid_completed_entries=()
 
 shopt -s nullglob
 for file in docs/exec-plans/active/*.md; do
   active_count=$((active_count + 1))
+
+  if ! [[ "$file" =~ $active_pattern ]]; then
+    invalid_active_entries+=("- \`$file\` (파일명 규칙 위반)")
+  fi
+
   base_name="$(basename "$file" .md)"
   date_prefix="${base_name:0:10}"
 
@@ -63,6 +72,13 @@ for file in docs/exec-plans/active/*.md; do
   fi
 done
 shopt -u nullglob
+
+while IFS= read -r file; do
+  [[ -z "$file" ]] && continue
+  if ! [[ "$file" =~ $completed_pattern ]]; then
+    invalid_completed_entries+=("- \`$file\` (경로/파일명 규칙 위반)")
+  fi
+done < <(find docs/exec-plans/completed -mindepth 1 -type f -name "*.md" | sort)
 
 todo_lines="$(
   rg -n \
@@ -83,6 +99,8 @@ todo_count="$(printf "%s\n" "$todo_lines" | sed '/^$/d' | wc -l | tr -d ' ')"
   echo "- 오래된 active 계획 수: $stale_count"
   echo "- 문서 TODO/FIXME 수: $todo_count"
   echo "- 필수 문서 누락 수: ${#missing_docs[@]}"
+  echo "- active 파일명 규칙 위반 수: ${#invalid_active_entries[@]}"
+  echo "- completed 파일명/경로 규칙 위반 수: ${#invalid_completed_entries[@]}"
   echo
   echo "## 오래된 실행 계획"
   if (( ${#stale_entries[@]} == 0 )); then
@@ -98,6 +116,14 @@ todo_count="$(printf "%s\n" "$todo_lines" | sed '/^$/d' | wc -l | tr -d ' ')"
     for file in "${missing_docs[@]}"; do
       echo "- \`$file\`"
     done
+  fi
+  echo
+  echo "## 실행계획 파일명 규칙 위반"
+  if (( ${#invalid_active_entries[@]} == 0 && ${#invalid_completed_entries[@]} == 0 )); then
+    echo "- 없음"
+  else
+    printf '%s\n' "${invalid_active_entries[@]}"
+    printf '%s\n' "${invalid_completed_entries[@]}"
   fi
   echo
   echo "## TODO/FIXME 샘플 (최대 20줄)"

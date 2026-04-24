@@ -48,9 +48,9 @@
 ## 변경 계획 규칙
 - 작은 변경: 코드와 관련 문서를 같은 PR에서 같이 수정합니다.
 - 수시간 이상 변경:
-  - `docs/exec-plans/active/YYYY-MM-DD-topic.md` 생성
+  - `./scripts/new-exec-plan.sh <topic> <owner>`로 `docs/exec-plans/active/YYYY-MM-DD-HHMMSS-topic-owner.md` 생성
   - 목표, 체크포인트, 결정 로그, 검증 결과 기록
-  - 완료 후 `docs/exec-plans/completed/`로 이동
+  - 완료 후 문서 담당 1명이 `docs/exec-plans/completed/YYYY-MM/`로 이동
 
 ## 계약 안정성 규칙
 - 내부 API가 바뀌면 `docs/references/internal-api-contracts.md`를 반드시 갱신합니다.
@@ -60,6 +60,7 @@
 ## 가드닝 규칙
 - 실행 계획의 active 상태가 길어지면 `doc-gardening` 리포트에서 점검합니다.
 - 반복 TODO/FIXME는 실행 계획 또는 기술 부채 항목으로 승격합니다.
+- `completed/` 파일은 읽기 전용으로 간주하고 신규 파일 추가만 허용합니다.
 
 ## 보안/신뢰성 체크포인트
 - 시크릿, API 키, 민감한 원문 페이로드를 로그로 남기지 않습니다.

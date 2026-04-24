@@ -1,4 +1,8 @@
-# YYYY-MM-DD-topic
+# YYYY-MM-DD-HHMMSS-topic-owner
+
+- 작성자:
+- 상태: 진행 중
+- 생성시각(로컬):
 
 ## 배경
 
@@ -21,4 +25,4 @@
 - [ ] 계약 검사
 
 ## 결정 로그
-- YYYY-MM-DD:
+- YYYY-MM-DD HH:MM:SS:
