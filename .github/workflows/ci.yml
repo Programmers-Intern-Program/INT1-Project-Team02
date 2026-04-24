@@ -24,9 +24,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: 에이전트 문서 구조 검사
+        run: |
+          chmod +x scripts/check-agent-docs.sh
+          ./scripts/check-agent-docs.sh
+
       # ✅ Spotless 검사
       - name: Run Spotless Check
         run: ./gradlew spotlessCheck
+
+      - name: 아키텍처 경계 테스트
+        run: ./gradlew test --tests "com.flodiback.architecture.*"
 
       - name: Build and Test
         run: ./gradlew build

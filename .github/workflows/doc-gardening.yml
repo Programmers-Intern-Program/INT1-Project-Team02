@@ -1,0 +1,38 @@
+name: Doc Gardening
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  garden:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 문서 가드닝 리포트 생성
+        run: |
+          chmod +x scripts/doc-gardening.sh
+          ./scripts/doc-gardening.sh
+
+      - name: 가드닝 리포트 자동 PR 생성
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/doc-gardening-report
+          title: 'docs: 주간 문서 가드닝 리포트 갱신'
+          commit-message: 'docs: 문서 가드닝 리포트 갱신'
+          body: |
+            주간 문서 가드닝 리포트를 자동 갱신합니다.
+            - active 실행 계획 노후도
+            - TODO/FIXME 누적 현황
+            - 필수 문서 누락 여부
+          labels: |
+            docs
+            maintenance
+          delete-branch: true
