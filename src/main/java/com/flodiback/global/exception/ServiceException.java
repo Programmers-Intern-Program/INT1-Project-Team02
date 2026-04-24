@@ -1,6 +1,6 @@
 package com.flodiback.global.exception;
 
-import com.back.global.rsData.RsData;
+import com.flodiback.global.rsData.RsData;
 
 import lombok.Getter;
 

@@ -3,7 +3,6 @@ package com.flodiback.global.globalExceptionHandler;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +15,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import com.flodiback.global.exception.ServiceException;
 import com.flodiback.global.rsData.RsData;
+
+import jakarta.validation.ConstraintViolationException;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
