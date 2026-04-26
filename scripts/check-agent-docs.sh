@@ -19,8 +19,10 @@ required_files=(
   "docs/exec-plans/tech-debt-tracker.md"
   "docs/generated/db-schema.md"
   "docs/generated/doc-gardening-report.md"
+  "docs/impl/README.md"
   "docs/product-specs/index.md"
   "docs/references/internal-api-contracts.md"
+  "docs/references/impl-record-template.md"
   "scripts/new-exec-plan.sh"
   "scripts/doc-gardening.sh"
   ".github/workflows/doc-gardening.yml"
@@ -69,8 +71,15 @@ if ! grep -q "tech-debt-tracker.md" AGENTS.md; then
   exit 1
 fi
 
+if ! grep -q "docs/impl/{author-kebab-case}/" AGENTS.md; then
+  echo "AGENTS.md에 구현 기록 경로 규칙이 필요합니다."
+  exit 1
+fi
+
 active_pattern='^docs/exec-plans/active/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[^/]+-[^/]+\.md$'
 completed_pattern='^docs/exec-plans/completed/[0-9]{4}-[0-9]{2}/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[^/]+-[^/]+\.md$'
+impl_author_pattern='^docs/impl/[a-z0-9]+(-[a-z0-9]+)*$'
+impl_file_pattern='^docs/impl/[a-z0-9]+(-[a-z0-9]+)*/[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$'
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
@@ -102,5 +111,45 @@ while IFS= read -r path; do
     exit 1
   fi
 done < <(find docs/exec-plans/completed -mindepth 2 -type f -name "*.md" | sort)
+
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if ! [[ "$path" =~ $impl_author_pattern ]]; then
+    echo "구현 기록 작성자 폴더명 규칙 위반: $path"
+    echo "규칙: docs/impl/{author-kebab-case}/"
+    exit 1
+  fi
+done < <(find docs/impl -mindepth 1 -maxdepth 1 -type d | sort)
+
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if ! [[ "$path" =~ $impl_file_pattern ]]; then
+    echo "구현 기록 파일명 규칙 위반: $path"
+    echo "규칙: docs/impl/{author-kebab-case}/{MMDD}-{feature-kebab-case}.md"
+    exit 1
+  fi
+
+  first_line="$(head -n 1 "$path")"
+  if [[ "$first_line" != "---" ]]; then
+    echo "구현 기록 frontmatter가 없습니다: $path"
+    exit 1
+  fi
+
+  for field in "generated-by:" "reviewed-by:" "reviewed-at:" "evidence:"; do
+    if ! grep -q "^${field}" "$path"; then
+      echo "구현 기록 frontmatter 필드가 없습니다: $path ($field)"
+      exit 1
+    fi
+  done
+
+  for field in "reviewed-by" "reviewed-at" "evidence"; do
+    value="$(grep -m 1 "^${field}:" "$path" | sed "s/^${field}:[[:space:]]*//" | sed 's/[[:space:]]*#.*$//')"
+    if [[ -z "$value" ]]; then
+      echo "구현 기록 검토 필드가 비어 있습니다: $path ($field)"
+      echo "AI 초안은 허용되지만 PR 병합 전 reviewed-by, reviewed-at, evidence를 채워야 합니다."
+      exit 1
+    fi
+  done
+done < <(find docs/impl -mindepth 2 -type f -name "*.md" | sort)
 
 echo "에이전트 문서 검사를 통과했습니다."

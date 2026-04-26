@@ -6,6 +6,7 @@
 - `design-docs/`: 오래 유지할 설계 원칙과 아키텍처 신념
 - `exec-plans/`: 중간 이상 작업의 진행/완료 실행 계획
 - `generated/`: 스키마 스냅샷 등 동기화되는 기술 참조 문서
+- `impl/`: 작성자별 기능 구현 기록과 기술 선택/대안/문제 해결 기록
 - `product-specs/`: 기능 동작과 사용자 관점 요구사항
 - `references/`: API 계약, 테스트 명령어, 운영 참고사항
   - 예: `docs/generated/doc-gardening-report.md` (주간 자동 생성)
@@ -22,6 +23,7 @@
 4. `docs/references/internal-api-contracts.md`
 5. `docs/generated/db-schema.md`
 6. `docs/exec-plans/tech-debt-tracker.md`
+7. `docs/impl/README.md`
 
 ## 유지 규칙
 - 문서는 작게 유지하고, 서로 링크로 연결합니다.

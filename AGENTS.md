@@ -52,6 +52,15 @@
   - 목표, 체크포인트, 결정 로그, 검증 결과 기록
   - 완료 후 문서 담당 1명이 `docs/exec-plans/completed/YYYY-MM/`로 이동
 
+## 구현 기록 규칙
+- 새 기능/주요 설계 변경은 `docs/impl/{author-kebab-case}/`에 구현 기록을 남깁니다.
+- 파일명은 `{MMDD}-{feature-kebab-case}.md`를 사용합니다.
+- 템플릿은 `docs/references/impl-record-template.md`를 따릅니다.
+- 단순 오타, 포맷, 작은 테스트 수정은 생략할 수 있습니다.
+- AI가 구현 기록 초안을 작성할 때는 `reviewed-by`, `reviewed-at`, `evidence`를 임의로 채우지 않습니다.
+- 수치, 실험 결과, 대안 검토 내용은 확인된 근거가 있을 때만 작성합니다.
+- AI가 생성한 구현 기록은 PR 병합 전 `reviewed-by`, `reviewed-at`, `evidence`를 채워 검토 완료 상태로 전환합니다.
+
 ## 계약 안정성 규칙
 - 내부 API가 바뀌면 `docs/references/internal-api-contracts.md`를 반드시 갱신합니다.
 - 데이터 모델이 바뀌면 `docs/generated/db-schema.md`를 반드시 갱신합니다.
