@@ -3,6 +3,7 @@ package com.flodiback.domain.meeting.meeting.service;
 import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class MeetingService {
 
     private final MeetingRepository meetingRepository;
@@ -50,6 +52,7 @@ public class MeetingService {
         return toDetailResponse(meeting);
     }
 
+    @Transactional(readOnly = true)
     public MeetingDetailResponse getById(Long id) {
         Meeting meeting =
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
