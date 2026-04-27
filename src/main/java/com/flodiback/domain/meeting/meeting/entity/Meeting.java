@@ -47,4 +47,9 @@ public class Meeting {
         this.title = title;
         this.status = status != null ? status : MeetingStatus.IN_PROGRESS;
     }
+
+    public void end() {
+        this.status = MeetingStatus.COMPLETED;
+        this.endedAt = LocalDateTime.now();
+    }
 }
