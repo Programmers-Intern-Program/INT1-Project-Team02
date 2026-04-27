@@ -1,0 +1,19 @@
+services:
+  discord-bot:
+    image: eclipse-temurin:21-jdk
+    platform: linux/arm64/v8
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - gradle-cache:/root/.gradle
+    env_file:
+      - .env
+    environment:
+      ORG_GRADLE_JAVA_INSTALLATIONS_AUTO_DOWNLOAD: "true"
+    command: ["/bin/bash", "-lc", "./gradlew --no-daemon runDiscordBot"]
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+volumes:
+  gradle-cache:

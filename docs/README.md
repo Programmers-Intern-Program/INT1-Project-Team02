@@ -10,6 +10,7 @@
 - `product-specs/`: 기능 동작과 사용자 관점 요구사항
 - `references/`: API 계약, 테스트 명령어, 운영 참고사항
   - 예: `docs/generated/doc-gardening-report.md` (주간 자동 생성)
+  - 예: `docs/references/discord-bot-jda-dave.md` (Discord 봇 음성 연결 가이드)
 
 ## 루트 운영 문서
 - `QUALITY_SCORE.md`: 품질 점수판과 개선 목표
