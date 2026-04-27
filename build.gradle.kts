@@ -6,27 +6,19 @@ plugins {
     jacoco
 }
 
-
 jacoco {
     // Jacoco 버전 (2026년 기준 최신 안정화 버전 권장)
     toolVersion = "0.8.14"
 }
 
 tasks.jacocoTestReport {
-    // 2. 리포트 생성 전 테스트가 반드시 실행되도록 설정
     dependsOn(tasks.test)
 
     reports {
-        // html 리포트 활성화 (브라우저로 볼 용도)
         html.required.set(true)
-        // xml 리포트 활성화 (SonarQube 등 연동용)
         xml.required.set(true)
-
-        // 리포트 저장 위치를 바꾸고 싶다면 (기본값은 build/reports/jacoco)
-        // html.outputLocation.set(layout.buildDirectory.dir("jacocoHtml"))
     }
 
-    // 3. 리포트에서 제외할 클래스 설정 (QueryDSL, DTO 등)
     classDirectories.setFrom(
         files(classDirectories.files.map {
             fileTree(it) {
@@ -34,7 +26,7 @@ tasks.jacocoTestReport {
                     "**/dto/**",
                     "**/config/**",
                     "**/*Application*",
-                    "**/Q*" // QueryDSL용
+                    "**/Q*"
                 )
             }
         })
@@ -42,7 +34,6 @@ tasks.jacocoTestReport {
 }
 
 tasks.test {
-    // 4. 테스트 완료 후 자동으로 Jacoco 리포트 생성
     finalizedBy(tasks.jacocoTestReport)
 }
 
@@ -101,8 +92,7 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     annotationProcessor("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    // Java 25(class file 69) 호환을 위해 ArchUnit 버전을 상향함
-    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.2")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
     testCompileOnly("org.projectlombok:lombok")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok")
