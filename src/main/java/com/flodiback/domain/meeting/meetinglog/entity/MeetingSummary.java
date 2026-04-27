@@ -1,10 +1,10 @@
-package com.flodiback.domain.meetinglog.entity;
+package com.flodiback.domain.meeting.meetinglog.entity;
 
 import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 
-import com.flodiback.domain.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.entity.Meeting;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;

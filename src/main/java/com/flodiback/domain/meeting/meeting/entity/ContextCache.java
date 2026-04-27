@@ -1,4 +1,4 @@
-package com.flodiback.domain.meeting.entity;
+package com.flodiback.domain.meeting.meeting.entity;
 
 import java.time.LocalDateTime;
 

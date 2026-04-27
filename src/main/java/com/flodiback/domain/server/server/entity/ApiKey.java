@@ -1,4 +1,4 @@
-package com.flodiback.domain.server.entity;
+package com.flodiback.domain.server.server.entity;
 
 import java.time.LocalDateTime;
 

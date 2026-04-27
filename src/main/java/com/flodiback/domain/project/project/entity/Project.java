@@ -1,10 +1,10 @@
-package com.flodiback.domain.project.entity;
+package com.flodiback.domain.project.project.entity;
 
 import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 
-import com.flodiback.domain.server.entity.DiscordServer;
+import com.flodiback.domain.server.server.entity.DiscordServer;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;

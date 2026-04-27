@@ -27,9 +27,8 @@
 ## 아키텍처 지도
 - 코어 패키지 루트: `src/main/java/com/flodiback`
 - API 엔트리포인트: `api/*`
-- 유스케이스 서비스: `application/*`
-- 도메인 모델: `domain/*/entity`
-- 기술 구현체: `infrastructure/*`
+- 도메인 기능 모듈: `domain/*/*`
+- 도메인 모델: `domain/*/*/entity`
 - 공통 관심사: `global/*`
 - 엔트리포인트: `FlodiBackApplication`
 - 컨텍스트/계약 문서:

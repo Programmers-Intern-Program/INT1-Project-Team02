@@ -1,4 +1,4 @@
-package com.flodiback.domain.meeting.type;
+package com.flodiback.global.enums;
 
 public enum MeetingStatus {
     IN_PROGRESS,

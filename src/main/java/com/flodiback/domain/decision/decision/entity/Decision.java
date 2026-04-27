@@ -1,11 +1,11 @@
-package com.flodiback.domain.decision.entity;
+package com.flodiback.domain.decision.decision.entity;
 
 import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 
-import com.flodiback.domain.meeting.entity.Meeting;
-import com.flodiback.domain.project.entity.Project;
+import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.project.project.entity.Project;
 import com.pgvector.PGvector;
 
 import jakarta.persistence.*;
