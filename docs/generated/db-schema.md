@@ -1,6 +1,6 @@
 # DB 스키마 스냅샷 (수동)
 
-기준 원본은 `src/main/java/com/flodiback/domain/**/entity` 하위 JPA 엔티티입니다.
+기준 원본은 `src/main/java/com/flodiback/domain/*/entity` 하위 JPA 엔티티입니다.
 
 ## 테이블
 

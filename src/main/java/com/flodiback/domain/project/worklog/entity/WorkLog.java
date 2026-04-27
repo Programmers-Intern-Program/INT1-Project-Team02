@@ -5,8 +5,8 @@ import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 
-import com.flodiback.domain.meeting.meeting.entity.Meeting;
-import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.meeting.entity.Meeting;
+import com.flodiback.domain.project.entity.Project;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
