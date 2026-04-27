@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,8 +70,7 @@ class InternalSpeechControllerTest {
                   "text": "이번 스프린트 목표를 어떻게 잡을까요?",
                   "timestamp": "2026-04-23T10:30:00"
                 }
-                """
-                .formatted(meeting.getId());
+                """.formatted(meeting.getId());
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -79,7 +79,10 @@ class InternalSpeechControllerTest {
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.meeting_id").value(meeting.getId()));
 
-        Utterance savedUtterance = utteranceRepository.findAll().getFirst();
+        List<Utterance> utterances = utteranceRepository.findAll();
+        assertThat(utterances).hasSize(1);
+
+        Utterance savedUtterance = utterances.get(0);
         assertThat(savedUtterance.getMeeting().getId()).isEqualTo(meeting.getId());
         assertThat(savedUtterance.getSpeakerDiscordId()).isEqualTo("123456789");
         assertThat(savedUtterance.getSpeakerName()).isEqualTo("김철수");
@@ -116,8 +119,7 @@ class InternalSpeechControllerTest {
                   "text": "",
                   "timestamp": "2026-04-23T10:30:00"
                 }
-                """
-                .formatted(meeting.getId());
+                """.formatted(meeting.getId());
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -136,8 +138,7 @@ class InternalSpeechControllerTest {
                   "text": "AI야, 인증 방식 뭐로 하기로 했지?",
                   "timestamp": "2026-04-23T10:30:00"
                 }
-                """
-                .formatted(meeting.getId());
+                """.formatted(meeting.getId());
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -145,7 +146,8 @@ class InternalSpeechControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
 
-        assertThat(utteranceRepository.findAll()).hasSize(1);
-        assertThat(utteranceRepository.findAll().getFirst().getContent()).isEqualTo("AI야, 인증 방식 뭐로 하기로 했지?");
+        List<Utterance> utterances = utteranceRepository.findAll();
+        assertThat(utterances).hasSize(1);
+        assertThat(utterances.get(0).getContent()).isEqualTo("AI야, 인증 방식 뭐로 하기로 했지?");
     }
 }
