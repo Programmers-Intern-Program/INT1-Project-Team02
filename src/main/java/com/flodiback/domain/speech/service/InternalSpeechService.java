@@ -27,7 +27,7 @@ public class InternalSpeechService {
                 .findById(request.meetingId())
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
 
-        // Python 봇이 넘긴 발화 시각을 spoken_at으로 저장한다.
+        // Discord 봇이 넘긴 발화 시각을 spoken_at으로 저장한다.
         Utterance utterance = Utterance.builder()
                 .meeting(meeting)
                 .speakerDiscordId(request.speakerDiscordId())

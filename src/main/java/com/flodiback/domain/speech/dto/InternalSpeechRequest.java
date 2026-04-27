@@ -20,5 +20,5 @@ public record InternalSpeechRequest(
         // STT가 변환한 발화 텍스트입니다.
         @NotBlank String text,
 
-        // Python 봇이 발화를 감지한 시각입니다.
+        // Discord 봇이 발화를 감지한 시각입니다.
         @NotNull LocalDateTime timestamp) {}
