@@ -50,4 +50,8 @@ public class Decision {
         this.content = content;
         this.embedding = embedding;
     }
+
+    public void updateContent(String content) {
+        this.content = content;
+    }
 }
