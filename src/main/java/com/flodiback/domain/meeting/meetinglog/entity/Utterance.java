@@ -2,8 +2,6 @@ package com.flodiback.domain.meeting.meetinglog.entity;
 
 import java.time.LocalDateTime;
 
-import org.hibernate.annotations.CreationTimestamp;
-
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 
 import jakarta.persistence.*;
@@ -35,15 +33,16 @@ public class Utterance {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    @CreationTimestamp
-    @Column(name = "spoken_at", nullable = false, updatable = false)
+    @Column(name = "spoken_at", nullable = false)
     private LocalDateTime spokenAt;
 
     @Builder
-    public Utterance(Meeting meeting, String speakerName, String speakerDiscordId, String content) {
+    public Utterance(
+            Meeting meeting, String speakerName, String speakerDiscordId, String content, LocalDateTime spokenAt) {
         this.meeting = meeting;
         this.speakerName = speakerName;
         this.speakerDiscordId = speakerDiscordId;
         this.content = content;
+        this.spokenAt = spokenAt != null ? spokenAt : LocalDateTime.now();
     }
 }
