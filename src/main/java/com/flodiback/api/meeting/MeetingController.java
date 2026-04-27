@@ -1,4 +1,4 @@
-package com.flodiback.domain.meeting.meeting.controller;
+package com.flodiback.api.meeting;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
