@@ -39,3 +39,6 @@ out/
 ### Claude Code local-only ###
 .claude/settings.local.json
 CLAUDE.local.md
+
+### Local environment secrets ###
+.env
