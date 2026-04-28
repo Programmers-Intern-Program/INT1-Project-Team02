@@ -1,7 +1,5 @@
 package com.flodiback.api.meeting;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
@@ -20,20 +18,17 @@ public class MeetingController {
     private final MeetingService service;
 
     @PostMapping
-    public ResponseEntity<RsData<CreateMeetingResponse>> createMeeting(@RequestBody CreateMeetingRequest req) {
-        CreateMeetingResponse response = service.create(req);
-        return ResponseEntity.status(HttpStatus.CREATED).body(RsData.of("201-1", "회의가 생성되었습니다.", response));
+    public RsData<CreateMeetingResponse> createMeeting(@RequestBody CreateMeetingRequest req) {
+        return RsData.of("201-1", "회의가 생성되었습니다.", service.create(req));
     }
 
     @PutMapping("/{id}/end")
-    public ResponseEntity<RsData<MeetingDetailResponse>> endMeeting(@PathVariable Long id) {
-        MeetingDetailResponse response = service.end(id);
-        return ResponseEntity.ok(RsData.of("200-1", "회의가 종료되었습니다.", response));
+    public RsData<MeetingDetailResponse> endMeeting(@PathVariable Long id) {
+        return RsData.of("200-1", "회의가 종료되었습니다.", service.end(id));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<RsData<MeetingDetailResponse>> getMeeting(@PathVariable Long id) {
-        MeetingDetailResponse response = service.getById(id);
-        return ResponseEntity.ok(RsData.of("200-1", "회의 조회 성공.", response));
+    public RsData<MeetingDetailResponse> getMeeting(@PathVariable Long id) {
+        return RsData.of("200-1", "회의 조회 성공.", service.getById(id));
     }
 }
