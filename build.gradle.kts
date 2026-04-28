@@ -98,6 +98,8 @@ dependencies {
     testImplementation("org.testcontainers:postgresql")
 
     testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
     testCompileOnly("org.projectlombok:lombok")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok")
