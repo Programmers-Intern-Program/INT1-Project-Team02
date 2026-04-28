@@ -8,8 +8,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +21,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -28,13 +29,11 @@ import org.testcontainers.utility.DockerImageName;
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.project.project.entity.Project;
-
-import jakarta.persistence.EntityManager;
+import com.flodiback.domain.project.project.repository.ProjectRepository;
 
 @Testcontainers
 @SpringBootTest(properties = {"spring.flyway.enabled=false", "spring.jpa.hibernate.ddl-auto=create-drop"})
 @AutoConfigureMockMvc
-@Transactional
 class DecisionControllerTest {
 
     private static final DockerImageName PGVECTOR_IMAGE =
@@ -49,7 +48,7 @@ class DecisionControllerTest {
 
     @DynamicPropertySource
     static void registerDataSourceProperties(DynamicPropertyRegistry registry) {
-        // Decision.embedding의 vector(768) 타입을 검증하기 위해 테스트 DB를 pgvector PostgreSQL로 연결합니다.
+        // Decision.embedding의 vector(768) 타입을 실제 PostgreSQL 확장에서 검증합니다.
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
@@ -59,31 +58,43 @@ class DecisionControllerTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private EntityManager entityManager;
+    private ProjectRepository projectRepository;
 
     @Autowired
     private DecisionRepository decisionRepository;
+
+    private final List<Long> testProjectIds = new ArrayList<>();
 
     private Project project;
     private Project otherProject;
 
     @BeforeEach
     void setUp() {
-        // 결정사항은 반드시 프로젝트에 속하므로 테스트용 프로젝트를 먼저 저장합니다.
-        project = Project.builder()
-                .name("Flodi")
-                .description("Discord AI 회의 에이전트")
-                .techStack("Spring Boot")
-                .build();
-        entityManager.persist(project);
+        testProjectIds.clear();
 
-        otherProject = Project.builder()
-                .name("Other")
-                .description("다른 프로젝트")
-                .techStack("Spring Boot")
-                .build();
-        entityManager.persist(otherProject);
-        entityManager.flush();
+        // MockMvc 요청에서도 조회되도록 Repository로 테스트 프로젝트를 먼저 저장합니다.
+        project = saveProject("Flodi", "Discord AI 회의 에이전트");
+        otherProject = saveProject("Other", "다른 프로젝트");
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (testProjectIds.isEmpty()) {
+            return;
+        }
+
+        // 기존 데이터를 보호하기 위해 테스트가 만든 프로젝트에 속한 결정사항만 삭제합니다.
+        List<Long> testDecisionIds = testProjectIds.stream()
+                .flatMap(projectId -> decisionRepository.findByProjectIdOrderByIdAsc(projectId).stream())
+                .map(Decision::getId)
+                .toList();
+
+        if (!testDecisionIds.isEmpty()) {
+            decisionRepository.deleteAllByIdInBatch(testDecisionIds);
+        }
+
+        projectRepository.deleteAllByIdInBatch(testProjectIds);
+        testProjectIds.clear();
     }
 
     @Test
@@ -176,7 +187,7 @@ class DecisionControllerTest {
 
         String requestBody = """
                 {
-                  "content": "수정하면 안 되는 결정사항"
+                  "content": "수정되면 안 되는 결정사항"
                 }
                 """;
 
@@ -218,9 +229,18 @@ class DecisionControllerTest {
                 .content(content)
                 .embedding(null)
                 .build();
-        entityManager.persist(decision);
-        entityManager.flush();
 
-        return decision;
+        return decisionRepository.save(decision);
+    }
+
+    private Project saveProject(String name, String description) {
+        Project savedProject = projectRepository.save(Project.builder()
+                .name(name)
+                .description(description)
+                .techStack("Spring Boot")
+                .build());
+        testProjectIds.add(savedProject.getId());
+
+        return savedProject;
     }
 }
