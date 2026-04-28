@@ -36,7 +36,7 @@ public class Decision {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    @Column(name = "embedding", columnDefinition = "vector(768)")
+    @Column(name = "embedding", columnDefinition = "vector(768)", insertable = false, updatable = false)
     private PGvector embedding;
 
     @CreationTimestamp
