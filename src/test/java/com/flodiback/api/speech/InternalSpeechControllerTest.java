@@ -22,13 +22,14 @@ import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.enums.MeetingStatus;
+import com.flodiback.support.AbstractPostgresIntegrationTest;
 
 import jakarta.persistence.EntityManager;
 
 @SpringBootTest(properties = {"spring.flyway.enabled=false", "spring.jpa.hibernate.ddl-auto=create-drop"})
 @AutoConfigureMockMvc
 @Transactional
-class InternalSpeechControllerTest {
+class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;

@@ -3,6 +3,8 @@ package com.flodiback.domain.project.project.entity;
 import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import com.flodiback.domain.server.server.entity.DiscordServer;
 
@@ -36,15 +38,20 @@ public class Project {
     @Column(name = "tech_stack", length = 255)
     private String techStack;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "metadata", columnDefinition = "jsonb")
+    private String metadata;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    public Project(DiscordServer server, String name, String description, String techStack) {
+    public Project(DiscordServer server, String name, String description, String techStack, String metadata) {
         this.server = server;
         this.name = name;
         this.description = description;
         this.techStack = techStack;
+        this.metadata = metadata;
     }
 }
