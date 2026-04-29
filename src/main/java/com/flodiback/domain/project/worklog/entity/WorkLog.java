@@ -41,6 +41,9 @@ public class WorkLog {
     @Column(name = "due_date")
     private LocalDate dueDate;
 
+    @Column(name = "status", nullable = false, length = 20)
+    private String status;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -52,5 +55,6 @@ public class WorkLog {
         this.assigneeName = assigneeName;
         this.task = task;
         this.dueDate = dueDate;
+        this.status = "TODO";
     }
 }

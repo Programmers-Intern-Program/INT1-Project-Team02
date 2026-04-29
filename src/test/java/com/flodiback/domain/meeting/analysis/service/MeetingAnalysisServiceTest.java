@@ -78,12 +78,14 @@ class MeetingAnalysisServiceTest {
                 .speakerName("홍길동")
                 .speakerDiscordId("user1")
                 .content("API 명세 확정했습니다.")
+                .sequenceNo(1L)
                 .build();
         Utterance u2 = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("김철수")
                 .speakerDiscordId("user2")
                 .content("다음 주 월요일까지 구현 완료 예정입니다.")
+                .sequenceNo(2L)
                 .build();
 
         String glmResponse = """
@@ -124,15 +126,18 @@ class MeetingAnalysisServiceTest {
         Meeting meeting = Meeting.builder().title("테스트 회의").build();
         ContextCache cache = ContextCache.builder()
                 .meeting(meeting)
+                .version(1)
                 .compressedText("지난 회의 요약 내용")
                 .tokenCount(100)
-                .turnRange("1-10")
+                .startSequenceNo(1L)
+                .endSequenceNo(10L)
                 .build();
         Utterance utterance = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("홍길동")
                 .speakerDiscordId("user1")
                 .content("오늘 안건입니다.")
+                .sequenceNo(1L)
                 .build();
 
         String glmResponse = """

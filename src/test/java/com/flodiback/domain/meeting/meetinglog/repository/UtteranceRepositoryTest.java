@@ -66,6 +66,7 @@ class UtteranceRepositoryTest extends AbstractPostgresIntegrationTest {
                 .speakerName(name)
                 .speakerDiscordId(discordId)
                 .content(content)
+                .sequenceNo((long) (Math.random() * 100000))
                 .build();
     }
 }
