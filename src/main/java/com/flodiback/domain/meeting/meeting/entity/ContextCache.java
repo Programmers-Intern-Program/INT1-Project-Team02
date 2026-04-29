@@ -24,24 +24,38 @@ public class ContextCache {
     @JoinColumn(name = "meeting_id", nullable = false)
     private Meeting meeting;
 
+    @Column(name = "version", nullable = false)
+    private Integer version;
+
     @Column(name = "compressed_text", nullable = false, columnDefinition = "TEXT")
     private String compressedText;
 
     @Column(name = "token_count", nullable = false)
     private Integer tokenCount;
 
-    @Column(name = "turn_range", nullable = false, length = 50)
-    private String turnRange;
+    @Column(name = "start_sequence_no", nullable = false)
+    private Long startSequenceNo;
+
+    @Column(name = "end_sequence_no", nullable = false)
+    private Long endSequenceNo;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    public ContextCache(Meeting meeting, String compressedText, Integer tokenCount, String turnRange) {
+    public ContextCache(
+            Meeting meeting,
+            Integer version,
+            String compressedText,
+            Integer tokenCount,
+            Long startSequenceNo,
+            Long endSequenceNo) {
         this.meeting = meeting;
+        this.version = version;
         this.compressedText = compressedText;
         this.tokenCount = tokenCount;
-        this.turnRange = turnRange;
+        this.startSequenceNo = startSequenceNo;
+        this.endSequenceNo = endSequenceNo;
     }
 }

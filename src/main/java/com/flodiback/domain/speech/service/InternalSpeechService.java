@@ -27,6 +27,10 @@ public class InternalSpeechService {
                 .findById(request.meetingId())
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
 
+        // 동시 요청이 들어오면 같은 sequenceNo가 배정될 수 있다.
+        // 현재는 단일 봇 환경이므로 허용하지만, 멀티 봇/고부하 환경에서는 DB 시퀀스나 낙관적 락으로 교체해야 한다.
+        long sequenceNo = utteranceRepository.countByMeeting(meeting) + 1;
+
         // Discord 봇이 넘긴 발화 시각을 spoken_at으로 저장한다.
         Utterance utterance = Utterance.builder()
                 .meeting(meeting)
@@ -34,6 +38,7 @@ public class InternalSpeechService {
                 .speakerName(request.speakerName())
                 .content(request.text())
                 .spokenAt(request.timestamp())
+                .sequenceNo(sequenceNo)
                 .build();
 
         Utterance savedUtterance = utteranceRepository.save(utterance);
