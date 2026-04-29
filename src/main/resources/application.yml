@@ -29,6 +29,11 @@ spring:
         highlight_sql: true
         use_sql_comments: true
         default_batch_fetch_size: 100
+glm:
+  api:
+    key: ${GLM_API_KEY}
+    model: ${GLM_MODEL:glm-5.1}
+
 springdoc:
   default-produces-media-type: application/json;charset=UTF-8
 logging:

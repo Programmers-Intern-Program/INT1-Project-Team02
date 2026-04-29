@@ -11,6 +11,10 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
+    env:
+      GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
+      GLM_MODEL: ${{ secrets.GLM_MODEL }}
+
     steps:
       - uses: actions/checkout@v4
 
