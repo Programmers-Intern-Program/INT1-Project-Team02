@@ -10,6 +10,7 @@ import com.flodiback.domain.decision.decision.entity.Decision;
 public interface DecisionRepository extends JpaRepository<Decision, Long> {
 
     List<Decision> findByProjectId(Long projectId);
+
     List<Decision> findByProjectIdOrderByIdAsc(Long projectId);
 
     Optional<Decision> findByIdAndProjectId(Long id, Long projectId);
