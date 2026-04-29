@@ -12,6 +12,11 @@
 ```bash
 export DISCORD_TOKEN=발급받은_토큰
 export DISCORD_BOT_PREFIX=!
+export DISCORD_DEFAULT_MEETING_ID=1
+export INTERNAL_API_BASE_URL=http://localhost:8080
+export OPENAI_API_KEY=...
+export OPENAI_REALTIME_WS_URL='wss://api.openai.com/v1/realtime?model=gpt-realtime&intent=transcription'
+export OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
 ```
 
 또는 루트의 `.env.example`을 참고해 `.env`를 구성합니다.
@@ -46,11 +51,19 @@ docker compose -f docker-compose.bot.yml down
 ## 명령어
 - `!ping`: 봇 상태 확인
 - `!join`: 명령 실행자가 들어간 음성 채널로 봇 입장
-- `!leave`: 음성 채널 퇴장
-- `!stats`: 화자별 수신 패킷/바이트 통계 확인
+- `!leave`: 음성 채널 퇴장(활성 STT 세션 commit/종료 포함)
+- `!stats`: 화자별 수신 패킷/바이트/STT 세션 통계 확인
+
+## STT 전달 흐름
+1. 봇이 Opus 패킷 수신
+2. 디코딩된 PCM을 화자별 STT 세션으로 `sendPcm`
+3. OpenAI Realtime에서 `completed` 도착 시 최종 텍스트 생성
+4. `BotSttListener`가 `/internal/v1/speech`로 POST
 
 ## 구현 메모
 - 엔트리포인트: `com.flodiback.bot.DiscordBotMain`
 - 명령 처리: `com.flodiback.bot.command.DiscordCommandListener`
-- 화자별 수신 핸들러: `com.flodiback.bot.audio.PerUserAudioReceiveHandler`
+- 화자별 수신/STT 세션: `com.flodiback.bot.audio.PerUserAudioReceiveHandler`
+- STT provider: `com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider`
+- 결과 POST 리스너: `com.flodiback.bot.stt.BotSttListener`
 - DAVE 설정: `AudioModuleConfig.withDaveSessionFactory(new JDaveSessionFactory())`

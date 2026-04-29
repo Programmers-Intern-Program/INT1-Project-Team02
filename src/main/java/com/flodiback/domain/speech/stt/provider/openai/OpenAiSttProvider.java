@@ -1,11 +1,11 @@
 package com.flodiback.domain.speech.stt.provider.openai;
 
-import com.flodiback.domain.speech.stt.SttListener;
-import com.flodiback.domain.speech.stt.SttProvider;
-
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
+import com.flodiback.domain.speech.stt.SttListener;
+import com.flodiback.domain.speech.stt.SttProvider;
 
 /**
  * STT Provider 진입점.
@@ -72,7 +72,6 @@ public class OpenAiSttProvider implements SttProvider {
         } catch (Exception exception) {
             session.sttListener().onError(sessionId, exception);
         }
-
     }
 
     @Override
