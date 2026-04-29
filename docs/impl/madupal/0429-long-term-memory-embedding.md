@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: madupal
+reviewed-at: 2026-04-29
+evidence: PR 27
 ---
 
 # 장기 기억 시스템 - 임베딩 기반 결정사항 저장 및 하이브리드 검색
