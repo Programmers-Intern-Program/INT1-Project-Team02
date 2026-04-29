@@ -73,6 +73,10 @@ public class GlmClient {
 
         ChatCompletion completion = client.chat().completions().create(params);
 
+        if (completion.choices().isEmpty()) {
+            throw new IllegalStateException("GLM 응답에 choices가 없습니다.");
+        }
+
         return completion.choices().get(0).message().content().orElse("");
     }
 }
