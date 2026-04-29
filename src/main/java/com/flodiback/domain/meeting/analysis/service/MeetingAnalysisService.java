@@ -76,9 +76,6 @@ public class MeetingAnalysisService {
         // result.decisions().forEach(item -> ...);
     }
 
-    /**
-     * context_cache(압축본) + utterances(원문) 를 하나의 문자열로 조합합니다.
-     */
     private String buildContext(Meeting meeting) {
         List<ContextCache> caches = contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting);
         List<Utterance> utterances = utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting);
@@ -97,9 +94,6 @@ public class MeetingAnalysisService {
         return sb.toString();
     }
 
-    /**
-     * GLM을 호출하고 응답을 AnalysisResult로 파싱합니다.
-     */
     private AnalysisResult callGlm(String context) {
         String raw = glmClient.chat(SYSTEM_PROMPT, context);
 
