@@ -43,7 +43,15 @@ $$
     END
 $$;
 
-ALTER TABLE decisions ADD COLUMN IF NOT EXISTS content_tsv TSVECTOR;
+ALTER TABLE decisions     ADD COLUMN IF NOT EXISTS content_tsv       TSVECTOR;
+ALTER TABLE work_logs    ADD COLUMN IF NOT EXISTS status             VARCHAR(20) NOT NULL DEFAULT 'TODO';
+ALTER TABLE utterances   ADD COLUMN IF NOT EXISTS speaker_type       VARCHAR(20) NOT NULL DEFAULT 'HUMAN';
+ALTER TABLE utterances   ADD COLUMN IF NOT EXISTS sequence_no        BIGINT      NOT NULL DEFAULT 0;
+ALTER TABLE utterances   ADD COLUMN IF NOT EXISTS token_count        INTEGER;
+ALTER TABLE context_cache ADD COLUMN IF NOT EXISTS version           INTEGER     NOT NULL DEFAULT 1;
+ALTER TABLE context_cache ADD COLUMN IF NOT EXISTS start_sequence_no BIGINT      NOT NULL DEFAULT 0;
+ALTER TABLE context_cache ADD COLUMN IF NOT EXISTS end_sequence_no   BIGINT      NOT NULL DEFAULT 0;
+ALTER TABLE context_cache DROP COLUMN IF EXISTS turn_range;
 
 CREATE INDEX IF NOT EXISTS idx_decisions_embedding
     ON decisions USING hnsw (embedding vector_cosine_ops)

@@ -44,17 +44,22 @@ CREATE TABLE IF NOT EXISTS utterances (
     meeting_id         BIGINT       NOT NULL REFERENCES meetings (id),
     speaker_name       VARCHAR(100) NOT NULL,
     speaker_discord_id VARCHAR(50)  NOT NULL,
+    speaker_type       VARCHAR(20)  NOT NULL DEFAULT 'HUMAN',
     content            TEXT         NOT NULL,
-    spoken_at          TIMESTAMP    NOT NULL
+    spoken_at          TIMESTAMP    NOT NULL,
+    sequence_no        BIGINT       NOT NULL,
+    token_count        INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS context_cache (
-    id              BIGSERIAL   PRIMARY KEY,
-    meeting_id      BIGINT      NOT NULL REFERENCES meetings (id),
-    compressed_text TEXT        NOT NULL,
-    token_count     INTEGER     NOT NULL,
-    turn_range      VARCHAR(50) NOT NULL,
-    created_at      TIMESTAMP   NOT NULL DEFAULT NOW()
+    id                BIGSERIAL PRIMARY KEY,
+    meeting_id        BIGINT    NOT NULL REFERENCES meetings (id),
+    version           INTEGER   NOT NULL,
+    compressed_text   TEXT      NOT NULL,
+    token_count       INTEGER   NOT NULL,
+    start_sequence_no BIGINT    NOT NULL,
+    end_sequence_no   BIGINT    NOT NULL,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS meeting_summaries (
@@ -71,7 +76,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     project_id BIGINT    NOT NULL REFERENCES projects (id),
     meeting_id BIGINT    REFERENCES meetings (id) ON DELETE SET NULL,
     content    TEXT      NOT NULL,
-    embedding  VECTOR(768),
+    embedding  VECTOR(1536),
     decided_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -82,5 +87,6 @@ CREATE TABLE IF NOT EXISTS work_logs (
     assignee_name VARCHAR(100) NOT NULL,
     task          TEXT         NOT NULL,
     due_date      DATE,
+    status        VARCHAR(20)  NOT NULL DEFAULT 'TODO',
     created_at    TIMESTAMP    NOT NULL DEFAULT NOW()
 );
