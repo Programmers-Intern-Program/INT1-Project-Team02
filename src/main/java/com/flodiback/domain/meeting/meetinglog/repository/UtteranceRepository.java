@@ -12,4 +12,6 @@ public interface UtteranceRepository extends JpaRepository<Utterance, Long> {
     List<Utterance> findTop20ByMeetingIdOrderBySpokenAtDesc(Long meetingId);
 
     List<Utterance> findByMeetingOrderBySpokenAtAsc(Meeting meeting);
+
+    long countByMeeting(Meeting meeting);
 }
