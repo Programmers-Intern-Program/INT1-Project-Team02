@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
+import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
@@ -20,14 +21,22 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
+import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 import com.flodiback.global.exception.ServiceException;
+import com.pgvector.PGvector;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ContextService {
+
+    private static final double SEMANTIC_WEIGHT = 0.7;
+    private static final double KEYWORD_WEIGHT = 0.3;
+    private static final int TOP_K = 5;
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
@@ -35,6 +44,8 @@ public class ContextService {
     private final MeetingSummaryRepository meetingSummaryRepository;
     private final ProjectRepository projectRepository;
     private final WorkLogRepository workLogRepository;
+    private final OpenAiEmbeddingClient embeddingClient;
+    private final DecisionEmbeddingService decisionEmbeddingService;
 
     public ContextResponse assemble(Long meetingId, String question) {
         Meeting meeting = meetingRepository
@@ -49,8 +60,7 @@ public class ContextService {
             return ContextResponse.noProject(recentUtterances);
         }
 
-        // question 파라미터는 RAG 도입 시 유사도 검색에 활용 예정
-        List<Decision> decisions = decisionRepository.findByProjectId(project.getId());
+        List<Decision> decisions = resolveDecisions(project.getId(), question);
         List<MeetingSummary> pastSummaries = meetingSummaryRepository.findPastByProjectId(project.getId(), meetingId);
 
         return ContextResponse.of(project, recentUtterances, decisions, pastSummaries);
@@ -73,13 +83,14 @@ public class ContextService {
                 .build());
 
         if (req.decisions() != null) {
-            req.decisions()
-                    .forEach(content -> decisionRepository.save(Decision.builder()
-                            .project(project)
-                            .meeting(meeting)
-                            .content(content)
-                            .embedding(null) // RAG 구현 시 임베딩 생성 추가 예정
-                            .build()));
+            req.decisions().forEach(content -> {
+                Decision saved = decisionRepository.save(Decision.builder()
+                        .project(project)
+                        .meeting(meeting)
+                        .content(content)
+                        .build());
+                decisionEmbeddingService.processEmbedding(saved);
+            });
         }
 
         if (req.actionItems() != null) {
@@ -91,6 +102,22 @@ public class ContextService {
                             .task(item.task())
                             .dueDate(item.dueDate())
                             .build()));
+        }
+    }
+
+    private List<Decision> resolveDecisions(Long projectId, String question) {
+        if (question == null || question.isBlank()) {
+            return decisionRepository.findByProjectIdOrderByIdAsc(projectId);
+        }
+
+        try {
+            float[] raw = embeddingClient.embed(question);
+            String embeddingStr = new PGvector(raw).getValue();
+            return decisionRepository.hybridSearch(
+                    projectId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT);
+        } catch (Exception e) {
+            log.warn("하이브리드 서치 실패, 전체 결정사항으로 폴백 - projectId={}: {}", projectId, e.getMessage());
+            return decisionRepository.findByProjectIdOrderByIdAsc(projectId);
         }
     }
 }

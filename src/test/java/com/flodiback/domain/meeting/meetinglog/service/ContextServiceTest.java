@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
+import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
@@ -35,6 +36,7 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
+import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 import com.flodiback.global.exception.ServiceException;
 
 @ExtendWith(MockitoExtension.class)
@@ -57,6 +59,12 @@ class ContextServiceTest {
 
     @Mock
     private WorkLogRepository workLogRepository;
+
+    @Mock
+    private OpenAiEmbeddingClient embeddingClient;
+
+    @Mock
+    private DecisionEmbeddingService decisionEmbeddingService;
 
     @InjectMocks
     private ContextService contextService;
@@ -127,7 +135,7 @@ class ContextServiceTest {
         given(meeting.getProject()).willReturn(project);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L)).willReturn(Collections.emptyList());
-        given(decisionRepository.findByProjectId(10L)).willReturn(Collections.emptyList());
+        given(decisionRepository.findByProjectIdOrderByIdAsc(10L)).willReturn(Collections.emptyList());
         given(meetingSummaryRepository.findPastByProjectId(10L, 1L)).willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);

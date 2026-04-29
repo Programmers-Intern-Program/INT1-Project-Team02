@@ -13,7 +13,8 @@ public abstract class AbstractPostgresIntegrationTest {
     static final PostgreSQLContainer<?> POSTGRES;
 
     static {
-        POSTGRES = new PostgreSQLContainer<>("pgvector/pgvector:pg16");
+        // withInitScript: 컨테이너 시작 시 한 번만 실행되어 connection-init-sql보다 안정적
+        POSTGRES = new PostgreSQLContainer<>("pgvector/pgvector:pg16").withInitScript("init-pgvector.sql");
         POSTGRES.start();
     }
 
@@ -22,8 +23,9 @@ public abstract class AbstractPostgresIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
-        // pgvector 익스텐션은 DB 전체 범위라 커넥션 생성 시 한 번만 실행해도 충분
-        registry.add("spring.datasource.hikari.connection-init-sql", () -> "CREATE EXTENSION IF NOT EXISTS vector");
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        // Flyway는 테스트에서 비활성화 (Hibernate create-drop이 스키마를 직접 관리)
+        registry.add("spring.flyway.enabled", () -> "false");
+        registry.add("openai.api-key", () -> "test-key");
     }
 }
