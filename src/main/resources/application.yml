@@ -37,8 +37,9 @@ spring:
 openai:
   api-key: ${OPENAI_API_KEY}
 glm:
+  enabled: ${GLM_ENABLED:false}
   api:
-    key: ${GLM_API_KEY}
+    key: ${GLM_API_KEY:}
     model: ${GLM_MODEL:glm-5.1}
     url: ${GLM_API_URL:https://api.z.ai/api}
 

@@ -19,6 +19,7 @@ public class InternalSpeechService {
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
+    private final SpeechAiAnswerService speechAiAnswerService;
 
     @Transactional
     public InternalSpeechResponse saveSpeech(InternalSpeechRequest request) {
@@ -43,9 +44,9 @@ public class InternalSpeechService {
 
         Utterance savedUtterance = utteranceRepository.save(utterance);
 
-        // TODO: 호출어("AI야", "봇아", "클로드야") 감지 후 GLM AI Gateway 스트리밍 응답 흐름을 연결한다.
-        // 현재 1차 범위에서는 STT 발화 저장까지만 처리한다.
+        // 호출어가 있는 발화라면 회의 컨텍스트와 GLM을 사용해 봇이 출력할 답변을 만든다.
+        String aiAnswer = speechAiAnswerService.generateAnswerIfCalled(meeting.getId(), request.text());
 
-        return new InternalSpeechResponse(savedUtterance.getId(), meeting.getId());
+        return new InternalSpeechResponse(savedUtterance.getId(), meeting.getId(), aiAnswer);
     }
 }

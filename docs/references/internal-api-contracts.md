@@ -16,6 +16,22 @@ Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
 }
 ```
 
+응답 본문:
+```json
+{
+  "resultCode": "200-1",
+  "msg": "발화가 저장되었습니다.",
+  "data": {
+    "utterance_id": 11,
+    "meeting_id": 1,
+    "ai_answer": "네, 기존 결정사항 기준으로 인증 방식은 JWT를 사용하기로 했습니다."
+  }
+}
+```
+
+- `ai_answer`는 호출어가 감지되어 AI 답변이 생성된 경우에만 문자열로 내려갑니다.
+- 호출어가 없거나 AI 답변 생성에 실패하면 `ai_answer`는 `null`입니다.
+
 ## `GET /internal/v1/projects/{id}/context`
 에이전트/봇 워크플로에서 사용할 프로젝트 컨텍스트를 조회합니다.
 
