@@ -1,3 +1,7 @@
+glm:
+  # 테스트에서는 외부 GLM 키 없이 컨텍스트가 뜨도록 채팅 기능을 끕니다.
+  enabled: false
+
 spring:
   jpa:
     hibernate:
