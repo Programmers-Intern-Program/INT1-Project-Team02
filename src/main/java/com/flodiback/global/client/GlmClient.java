@@ -6,6 +6,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import ai.z.openapi.ZaiClient;
+import ai.z.openapi.service.agents.AgentContent;
+import ai.z.openapi.service.agents.AgentMessage;
+import ai.z.openapi.service.agents.AgentsCompletionRequest;
 import ai.z.openapi.service.model.ChatCompletionCreateParams;
 import ai.z.openapi.service.model.ChatMessage;
 import ai.z.openapi.service.model.ChatMessageRole;
@@ -91,5 +94,37 @@ public class GlmClient {
                 .getMessage()
                 .getContent()
                 .toString();
+    }
+
+    /**
+     * Agent Chat API를 호출하고 어시스턴트 응답 텍스트를 반환합니다.
+     *
+     * <p>Agent Chat은 Z.AI 플랫폼에 미리 구성된 에이전트를 호출합니다.
+     * 에이전트 ID는 Z.AI 콘솔에서 확인할 수 있습니다.
+     *
+     * @param agentId     호출할 에이전트 ID (예: "general_translation")
+     * @param userMessage 사용자 입력 메시지
+     * @return 에이전트가 생성한 응답 텍스트
+     * @throws RuntimeException Agent API 호출 실패 시
+     */
+    public String agentChat(String agentId, String userMessage) {
+        AgentsCompletionRequest request = AgentsCompletionRequest.builder()
+                .agentId(agentId)
+                .messages(List.of(AgentMessage.builder()
+                        .role(ChatMessageRole.USER.value())
+                        .content(List.of(AgentContent.ofText(userMessage)))
+                        .build()))
+                .stream(false)
+                .build();
+
+        List<AgentMessage> messages = zaiClient
+                .agents()
+                .createAgentCompletion(request)
+                .getData()
+                .getChoices()
+                .get(0)
+                .getMessages();
+
+        return messages.get(messages.size() - 1).getContent().toString();
     }
 }
