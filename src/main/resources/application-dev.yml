@@ -14,3 +14,10 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         default_batch_fetch_size: 100
+
+glm:
+  # 실제 GLM SDK 구현체가 붙기 전까지는 기본 비활성 상태로 둡니다.
+  enabled: ${GLM_ENABLED:false}
+  api:
+    key: ${GLM_API_KEY:}
+    model: ${GLM_API_MODEL:glm-5}
