@@ -33,6 +33,7 @@ glm:
   api:
     key: ${GLM_API_KEY}
     model: ${GLM_MODEL:glm-5.1}
+    url: ${GLM_API_URL:https://api.z.ai/api}
 
 springdoc:
   default-produces-media-type: application/json;charset=UTF-8
