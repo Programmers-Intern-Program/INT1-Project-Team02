@@ -1,5 +1,6 @@
 package com.flodiback.global.client;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,7 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p>실행 전 로컬 .env 파일에 GLM_API_KEY가 설정되어 있어야 합니다.
  */
-// @Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
+@Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
 @SpringBootTest
 class GlmClientManualTest {
 
