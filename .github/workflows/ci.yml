@@ -14,6 +14,7 @@ jobs:
     env:
       GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
       GLM_MODEL: ${{ secrets.GLM_MODEL }}
+      GLM_API_URL: ${{ secrets.GLM_API_URL }}
 
     steps:
       - uses: actions/checkout@v4
