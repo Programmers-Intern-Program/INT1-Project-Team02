@@ -1,12 +1,15 @@
 package com.flodiback.bot.command;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.flodiback.bot.audio.PerUserAudioReceiveHandler;
+import com.flodiback.domain.speech.stt.SttProvider;
+import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
@@ -17,38 +20,46 @@ import net.dv8tion.jda.api.managers.AudioManager;
 /**
  * Discord 텍스트 명령 처리 리스너.
  *
- * <p>현재 지원 명령: !ping, !join, !leave, !stats
+ * <p>현재 지원 명령:
+ * - !ping
+ * - !join
+ * - !leave
+ * - !stats
  */
 public class DiscordCommandListener extends ListenerAdapter {
     private static final Logger log = LoggerFactory.getLogger(DiscordCommandListener.class);
 
-    // 명령어 접두사 (기본값: !)
+    // 명령어 접두사(예: !)
     private final String prefix;
-    // 길드별 오디오 수신 핸들러를 보관한다.
+    // 실제 STT 엔진 구현체(현재 OpenAI)
+    private final SttProvider sttProvider;
+    // 기본 meetingId (현재는 단일 값 사용)
+    private final long defaultMeetingId;
+    // 길드별 오디오 수신 핸들러 캐시
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
 
     public DiscordCommandListener() {
-        this("!");
+        this("!", new OpenAiSttProvider(), 1L);
     }
 
-    public DiscordCommandListener(String prefix) {
+    public DiscordCommandListener(String prefix, SttProvider sttProvider, long defaultMeetingId) {
         this.prefix = (prefix == null || prefix.isBlank()) ? "!" : prefix.trim();
+        this.sttProvider = Objects.requireNonNull(sttProvider);
+        this.defaultMeetingId = defaultMeetingId;
     }
 
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
-        // 봇 메시지/DM은 처리하지 않는다.
+        // 봇 메시지/DM은 명령 처리 대상에서 제외
         if (event.getAuthor().isBot() || !event.isFromGuild()) {
             return;
         }
 
         String raw = event.getMessage().getContentRaw().trim();
-        // 접두사로 시작하지 않으면 명령으로 보지 않는다.
         if (!raw.startsWith(prefix)) {
             return;
         }
 
-        // 접두사 제거 후 명령 텍스트만 추출
         String command = raw.substring(prefix.length()).trim().toLowerCase();
         switch (command) {
             case "ping" -> event.getChannel().sendMessage("pong").queue();
@@ -56,14 +67,13 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
             default -> {
-                // 현재는 알 수 없는 명령어를 무시한다.
+                // 미지원 명령은 조용히 무시
             }
         }
     }
 
     private void handleJoin(MessageReceivedEvent event) {
         Member member = event.getMember();
-        // 명령 실행자가 음성 채널에 없으면 입장할 채널을 결정할 수 없다.
         if (member == null
                 || member.getVoiceState() == null
                 || member.getVoiceState().getChannel() == null) {
@@ -71,15 +81,16 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
-        // 실행자와 같은 음성 채널로 봇을 입장시킨다.
         AudioChannel targetChannel = member.getVoiceState().getChannel();
         AudioManager audioManager = event.getGuild().getAudioManager();
-        // 길드별 수신 핸들러를 한 번만 만들고 재사용한다.
+
+        // 길드별 핸들러를 1개 유지한다.
+        // (디스코드 특성상 봇 1개는 길드 내 음성 채널 1개 연결만 가능)
         PerUserAudioReceiveHandler handler = receiveHandlers.computeIfAbsent(
                 event.getGuild().getIdLong(),
-                guildId -> new PerUserAudioReceiveHandler(event.getGuild().getIdLong()));
+                guildId -> new PerUserAudioReceiveHandler(guildId, sttProvider, defaultMeetingId));
 
-        // 수신 핸들러 연결 + self deafen 해제(수신 필요) + 실제 연결
+        // 오디오 수신 핸들러 연결 + 음성 연결
         audioManager.setReceivingHandler(handler);
         audioManager.setAutoReconnect(true);
         audioManager.setSelfMuted(false);
@@ -96,25 +107,34 @@ public class DiscordCommandListener extends ListenerAdapter {
                         + ", selfDeafened="
                         + audioManager.isSelfDeafened())
                 .queue();
+
         log.info(
-                "Joined voice channel. guildId={}, channelId={}, channelName={}",
+                "Joined voice channel. guildId={}, channelId={}, channelName={}, meetingId={}",
                 event.getGuild().getId(),
                 targetChannel.getId(),
-                targetChannel.getName());
+                targetChannel.getName(),
+                defaultMeetingId);
     }
 
     private void handleLeave(MessageReceivedEvent event) {
         AudioManager audioManager = event.getGuild().getAudioManager();
-        // 연결 해제 + 핸들러 정리
+        PerUserAudioReceiveHandler handler =
+                receiveHandlers.remove(event.getGuild().getIdLong());
+
+        // leave 시점에는 열린 STT 세션을 먼저 commit/end로 닫는다.
+        if (handler != null) {
+            handler.closeAllSttSessions();
+        }
+
+        // 디스코드 음성 연결 종료 + 핸들러 해제
         audioManager.closeAudioConnection();
         audioManager.setReceivingHandler(null);
-        receiveHandlers.remove(event.getGuild().getIdLong());
+
         event.getChannel().sendMessage("퇴장 완료").queue();
         log.info("Left voice channel. guildId={}", event.getGuild().getId());
     }
 
     private void handleStats(MessageReceivedEvent event) {
-        // 현재 길드 세션의 누적 통계를 텍스트로 응답한다.
         AudioManager audioManager = event.getGuild().getAudioManager();
         PerUserAudioReceiveHandler handler =
                 receiveHandlers.get(event.getGuild().getIdLong());
