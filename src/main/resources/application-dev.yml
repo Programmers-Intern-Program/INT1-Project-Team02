@@ -14,3 +14,7 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         default_batch_fetch_size: 100
+
+glm:
+  # 실제 GLM 호출은 .env에서 GLM_ENABLED=true로 켰을 때만 사용합니다.
+  enabled: ${GLM_ENABLED:false}
