@@ -7,15 +7,74 @@ import org.slf4j.LoggerFactory;
 final class OpenAiPcmConverter {
     private static final Logger log = LoggerFactory.getLogger(OpenAiPcmConverter.class);
 
+    private static final int PCM_16BIT_BYTES = 2;
+    private static final int INPUT_CHANNELS = 2;
+    private static final int INPUT_FRAME_BYTES = PCM_16BIT_BYTES * INPUT_CHANNELS;
+    private static final int DOWNSAMPLE_FACTOR = 2;
     private static final AtomicOnce WARN_ONCE = new AtomicOnce();
 
     byte[] toRealtimePcm16(byte[] jdaPcm) {
-        // TODO: 현재 JDA PCM이 48kHz 16-bit stereo 라고 가정 하고 그냥 통과,
-        //  OpenAI Realtime이 24kHz 16-bit mono 를 요구하므로 이후 endian 정규화 구현 필요
-        WARN_ONCE.run(() -> log.warn(
-                "OpenAiPcmConverter is pass-through mode. Implement 24k mono conversion before production use."));
+        if (jdaPcm == null || jdaPcm.length == 0) {
+            return new byte[0];
+        }
 
-        return jdaPcm;
+        // JDA 디코딩 PCM은 48kHz stereo 16-bit little-endian 으로 가정한다.
+        // OpenAI Realtime transcription은 24kHz mono PCM을 요구하므로:
+        // 1) stereo -> mono 다운믹스
+        // 2) 48k -> 24k 다운샘플
+        int completeInputFrames = jdaPcm.length / INPUT_FRAME_BYTES;
+        int outputFrames = completeInputFrames / DOWNSAMPLE_FACTOR;
+        if (outputFrames == 0) {
+            return new byte[0];
+        }
+
+        int truncatedBytes = jdaPcm.length - (completeInputFrames * INPUT_FRAME_BYTES);
+        WARN_ONCE.run(() -> log.info(
+                "OpenAiPcmConverter enabled. inputAssumption=48k_stereo_pcm16le, outputFormat=24k_mono_pcm16le"));
+        if (truncatedBytes > 0) {
+            log.debug("Ignoring trailing PCM bytes that do not fill a frame. bytes={}", truncatedBytes);
+        }
+
+        byte[] output = new byte[outputFrames * PCM_16BIT_BYTES];
+        for (int outputFrameIndex = 0; outputFrameIndex < outputFrames; outputFrameIndex++) {
+            int inputFrameIndex = outputFrameIndex * DOWNSAMPLE_FACTOR;
+
+            int monoSampleA = mixStereoFrameToMono(jdaPcm, inputFrameIndex);
+            int monoSampleB = mixStereoFrameToMono(jdaPcm, inputFrameIndex + 1);
+            short downsampledMono = clampToShort((monoSampleA + monoSampleB) / 2);
+
+            writeLittleEndianShort(output, outputFrameIndex * PCM_16BIT_BYTES, downsampledMono);
+        }
+
+        return output;
+    }
+
+    private int mixStereoFrameToMono(byte[] pcm, int frameIndex) {
+        int offset = frameIndex * INPUT_FRAME_BYTES;
+        short left = readLittleEndianShort(pcm, offset);
+        short right = readLittleEndianShort(pcm, offset + PCM_16BIT_BYTES);
+        return (left + right) / 2;
+    }
+
+    private short readLittleEndianShort(byte[] pcm, int offset) {
+        int low = pcm[offset] & 0xFF;
+        int high = pcm[offset + 1];
+        return (short) ((high << 8) | low);
+    }
+
+    private void writeLittleEndianShort(byte[] target, int offset, short value) {
+        target[offset] = (byte) (value & 0xFF);
+        target[offset + 1] = (byte) ((value >>> 8) & 0xFF);
+    }
+
+    private short clampToShort(int value) {
+        if (value > Short.MAX_VALUE) {
+            return Short.MAX_VALUE;
+        }
+        if (value < Short.MIN_VALUE) {
+            return Short.MIN_VALUE;
+        }
+        return (short) value;
     }
 
     /**

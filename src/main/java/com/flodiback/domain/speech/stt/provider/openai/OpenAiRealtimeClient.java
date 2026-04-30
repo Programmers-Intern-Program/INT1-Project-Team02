@@ -28,8 +28,12 @@ final class OpenAiRealtimeClient {
     private static final String ENV_OPENAI_API_KEY = "OPENAI_API_KEY";
     private static final String ENV_OPENAI_REALTIME_WS_URL = "OPENAI_REALTIME_WS_URL";
     private static final String ENV_OPENAI_TRANSCRIBE_MODEL = "OPENAI_TRANSCRIBE_MODEL";
+    private static final String ENV_OPENAI_TRANSCRIBE_LANGUAGE = "OPENAI_TRANSCRIBE_LANGUAGE";
+    private static final String ENV_OPENAI_TRANSCRIBE_PROMPT = "OPENAI_TRANSCRIBE_PROMPT";
 
     private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+    private static final String DEFAULT_TRANSCRIBE_LANGUAGE = "ko";
+    private static final String DEFAULT_TRANSCRIBE_PROMPT = "한국어 회의 대화입니다. 번역하지 말고 들리는 한국어를 그대로 전사하세요.";
     private static final Duration COMMIT_WAIT_TIMEOUT = Duration.ofSeconds(8);
 
     private final HttpClient httpClient =
@@ -65,9 +69,10 @@ final class OpenAiRealtimeClient {
 
         ObjectNode inputNode = sessionNode.putObject("audio").putObject("input");
         inputNode.putObject("format").put("type", "audio/pcm").put("rate", 24000);
-        inputNode
-                .putObject("transcription")
-                .put("model", envOrDefault(ENV_OPENAI_TRANSCRIBE_MODEL, DEFAULT_TRANSCRIBE_MODEL));
+        ObjectNode transcriptionNode = inputNode.putObject("transcription");
+        transcriptionNode.put("model", envOrDefault(ENV_OPENAI_TRANSCRIBE_MODEL, DEFAULT_TRANSCRIBE_MODEL));
+        transcriptionNode.put("language", envOrDefault(ENV_OPENAI_TRANSCRIBE_LANGUAGE, DEFAULT_TRANSCRIBE_LANGUAGE));
+        transcriptionNode.put("prompt", envOrDefault(ENV_OPENAI_TRANSCRIBE_PROMPT, DEFAULT_TRANSCRIBE_PROMPT));
         inputNode.putNull("turn_detection");
 
         sendJson(webSocket, root);

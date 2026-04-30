@@ -73,6 +73,12 @@ public class BotSttListener implements SttListener {
                     speakerDiscordId,
                     meetingId,
                     text.length());
+            log.info(
+                    "Final STT text. sessionId={}, speakerId={}, meetingId={}, text={}",
+                    result.sessionId(),
+                    speakerDiscordId,
+                    meetingId,
+                    text);
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(internalBaseUrl + "/internal/v1/speech"))

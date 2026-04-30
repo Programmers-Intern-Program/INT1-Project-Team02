@@ -10,9 +10,7 @@ services:
       - .env
     environment:
       ORG_GRADLE_JAVA_INSTALLATIONS_AUTO_DOWNLOAD: "true"
-    command: ["/bin/bash", "-lc", "./gradlew --no-daemon runDiscordBot"]
-    stdin_open: true
-    tty: true
+    command: ["/bin/bash", "-lc", "./gradlew --no-daemon --console=plain runDiscordBot"]
     restart: "no"
 
 volumes:
