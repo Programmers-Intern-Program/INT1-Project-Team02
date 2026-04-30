@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: dforce103
+reviewed-at: 2026-04-30
+evidence: PR 29
 ---
 
 # Discord Bot OpenAI STT 파이프라인 1차 연결
