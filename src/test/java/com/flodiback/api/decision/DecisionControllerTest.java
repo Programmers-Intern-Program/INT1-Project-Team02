@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -30,9 +31,15 @@ import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
+import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 
 @Testcontainers
-@SpringBootTest(properties = {"spring.flyway.enabled=false", "spring.jpa.hibernate.ddl-auto=create-drop"})
+@SpringBootTest(
+        properties = {
+            "spring.flyway.enabled=false",
+            "spring.jpa.hibernate.ddl-auto=create-drop",
+            "openai.api-key=test-key"
+        })
 @AutoConfigureMockMvc
 class DecisionControllerTest {
 
@@ -53,6 +60,9 @@ class DecisionControllerTest {
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
     }
+
+    @MockitoBean
+    private OpenAiEmbeddingClient embeddingClient;
 
     @Autowired
     private MockMvc mockMvc;
@@ -85,7 +95,7 @@ class DecisionControllerTest {
 
         // 기존 데이터를 보호하기 위해 테스트가 만든 프로젝트에 속한 결정사항만 삭제합니다.
         List<Long> testDecisionIds = testProjectIds.stream()
-                .flatMap(projectId -> decisionRepository.findByProjectIdOrderByIdAsc(projectId).stream())
+                .flatMap(projectId -> decisionRepository.findByProjectId(projectId).stream())
                 .map(Decision::getId)
                 .toList();
 
@@ -128,7 +138,7 @@ class DecisionControllerTest {
                 .andExpect(jsonPath("$.data.meetingId").doesNotExist())
                 .andExpect(jsonPath("$.data.content").value("인증 방식은 JWT로 한다."));
 
-        List<Decision> decisions = decisionRepository.findByProjectIdOrderByIdAsc(project.getId());
+        List<Decision> decisions = decisionRepository.findByProjectId(project.getId());
         assertThat(decisions).hasSize(1);
         assertThat(decisions.get(0).getContent()).isEqualTo("인증 방식은 JWT로 한다.");
     }
@@ -224,13 +234,8 @@ class DecisionControllerTest {
     }
 
     private Decision saveDecision(Project project, String content) {
-        Decision decision = Decision.builder()
-                .project(project)
-                .content(content)
-                .embedding(null)
-                .build();
-
-        return decisionRepository.save(decision);
+        return decisionRepository.save(
+                Decision.builder().project(project).content(content).build());
     }
 
     private Project saveProject(String name, String description) {

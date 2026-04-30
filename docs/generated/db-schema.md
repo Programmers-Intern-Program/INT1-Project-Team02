@@ -61,10 +61,13 @@
 ### `decisions`
 - `id` BIGINT PK
 - `project_id` BIGINT FK -> `projects.id` NOT NULL
-- `meeting_id` BIGINT FK -> `meetings.id` NULL
+- `meeting_id` BIGINT FK -> `meetings.id` NULL (ON DELETE SET NULL)
 - `content` TEXT NOT NULL
-- `embedding` VECTOR(768) NULL
+- `embedding` VECTOR(1536) NULL — OpenAI text-embedding-3-small
+- `content_tsv` TSVECTOR NULL — tsvector 트리거 자동 갱신 (하이브리드 서치용)
 - `decided_at` TIMESTAMP NOT NULL
+- INDEX: `idx_decisions_embedding` HNSW (m=16, ef_construction=64)
+- INDEX: `idx_decisions_tsv` GIN
 
 ### `work_logs`
 - `id` BIGINT PK
