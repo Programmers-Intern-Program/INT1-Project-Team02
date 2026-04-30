@@ -5,6 +5,7 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -154,12 +155,36 @@ final class OpenAiRealtimeClient {
     }
 
     private String normalizeTranscriptionWsUrl(String wsUrl) {
-        if (wsUrl.contains("intent=transcription")) {
-            return wsUrl;
+        URI uri = URI.create(wsUrl);
+        StringJoiner query = new StringJoiner("&");
+        boolean hasTranscriptionIntent = false;
+
+        String rawQuery = uri.getRawQuery();
+        if (rawQuery != null && !rawQuery.isBlank()) {
+            for (String parameter : rawQuery.split("&")) {
+                if (parameter.isBlank() || parameter.startsWith("model=")) {
+                    continue;
+                }
+                if (parameter.equals("intent=transcription")) {
+                    hasTranscriptionIntent = true;
+                }
+                query.add(parameter);
+            }
         }
 
-        // Current Realtime WebSocket routing creates a regular realtime session by default.
-        // Transcription session.update payloads require the connection to be opened as transcription intent.
-        return wsUrl + (wsUrl.contains("?") ? "&" : "?") + "intent=transcription";
+        if (!hasTranscriptionIntent) {
+            query.add("intent=transcription");
+        }
+
+        // Transcription sessions reject model=... in the WebSocket URL.
+        // The transcription model is configured inside session.update instead.
+        return URI.create(uri.getScheme()
+                        + "://"
+                        + uri.getRawAuthority()
+                        + uri.getRawPath()
+                        + "?"
+                        + query
+                        + (uri.getRawFragment() == null ? "" : "#" + uri.getRawFragment()))
+                .toString();
     }
 }

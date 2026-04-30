@@ -10,8 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
-import com.flodiback.domain.speech.dto.InternalSpeechRequest;
 import com.flodiback.domain.speech.stt.SttListener;
 import com.flodiback.domain.speech.stt.SttResult;
 
@@ -56,10 +56,23 @@ public class BotSttListener implements SttListener {
         }
 
         try {
-            InternalSpeechRequest body =
-                    new InternalSpeechRequest(meetingId, speakerDiscordId, speakerName, text, LocalDateTime.now());
-
+            // Spring이 관리하는 ObjectMapper가 아니므로 LocalDateTime 직렬화 설정이 없다.
+            // 그래서 내부 API 계약에 맞는 JSON을 직접 만들고 timestamp는 ISO 문자열로 넣는다.
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("meeting_id", meetingId);
+            body.put("speaker_discord_id", speakerDiscordId);
+            body.put("speaker_name", speakerName);
+            body.put("text", text);
+            body.put("timestamp", LocalDateTime.now().toString());
             String json = objectMapper.writeValueAsString(body);
+
+            // 보안상 원문(text)은 로그에 남기지 않고 길이만 남긴다.
+            log.info(
+                    "Final STT result received. sessionId={}, speakerId={}, meetingId={}, textLength={}",
+                    result.sessionId(),
+                    speakerDiscordId,
+                    meetingId,
+                    text.length());
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(internalBaseUrl + "/internal/v1/speech"))

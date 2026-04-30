@@ -15,9 +15,12 @@ export DISCORD_BOT_PREFIX=!
 export DISCORD_DEFAULT_MEETING_ID=1
 export INTERNAL_API_BASE_URL=http://localhost:8080
 export OPENAI_API_KEY=...
-export OPENAI_REALTIME_WS_URL='wss://api.openai.com/v1/realtime?model=gpt-realtime&intent=transcription'
+export OPENAI_REALTIME_WS_URL='wss://api.openai.com/v1/realtime?intent=transcription'
 export OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
 ```
+
+Docker에서 봇을 실행하고 Spring 서버를 호스트 Mac에서 실행한다면 `INTERNAL_API_BASE_URL`은
+`http://host.docker.internal:8080`로 설정해야 합니다.
 
 또는 루트의 `.env.example`을 참고해 `.env`를 구성합니다.
 봇은 시스템 환경변수 우선, 없으면 루트 `.env` 값을 fallback으로 읽습니다.
