@@ -332,4 +332,31 @@ class MeetingAnalysisServiceTest {
         // then
         verify(decisionRepository, never()).save(any(Decision.class));
     }
+
+    @Test
+    void analyze_decisions_null일때_저장_스킵() throws Exception {
+        // given
+        Project project = Project.builder().name("테스트 프로젝트").build();
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
+
+        String glmResponse = """
+                {
+                  "summary": "요약",
+                  "unresolvedItems": null,
+                  "worklogs": [],
+                  "decisions": null
+                }
+                """;
+
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
+        given(objectMapper.readValue(anyString(), any(Class.class)))
+                .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
+
+        // when & then (NPE 없이 정상 종료)
+        service.analyze(1L);
+        verify(decisionRepository, never()).save(any(Decision.class));
+    }
 }
