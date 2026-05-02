@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
@@ -19,6 +21,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flodiback.domain.decision.decision.entity.Decision;
+import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
@@ -28,6 +32,7 @@ import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.MeetingSummaryRepository;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
+import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.client.GlmClient;
 
 @ExtendWith(MockitoExtension.class)
@@ -47,6 +52,9 @@ class MeetingAnalysisServiceTest {
 
     @Mock
     private MeetingSummaryRepository meetingSummaryRepository;
+
+    @Mock
+    private DecisionRepository decisionRepository;
 
     @Mock
     private GlmClient glmClient;
@@ -222,5 +230,106 @@ class MeetingAnalysisServiceTest {
         assertThatThrownBy(() -> service.analyze(1L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("GLM 응답 파싱 실패");
+    }
+
+    // ── Decision 저장 ─────────────────────────────────────────────────────────
+
+    @Test
+    void analyze_project있을때_decision_저장됨() throws Exception {
+        // given
+        Project project = Project.builder().name("테스트 프로젝트").build();
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
+
+        String glmResponse = """
+                {
+                  "summary": "요약",
+                  "unresolvedItems": null,
+                  "worklogs": [],
+                  "decisions": [
+                    { "content": "Next.js로 프론트엔드 기술 스택 확정" }
+                  ]
+                }
+                """;
+
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
+        given(objectMapper.readValue(anyString(), any(Class.class)))
+                .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
+
+        // when
+        service.analyze(1L);
+
+        // then
+        ArgumentCaptor<Decision> captor = ArgumentCaptor.forClass(Decision.class);
+        verify(decisionRepository).save(captor.capture());
+
+        Decision saved = captor.getValue();
+        assertThat(saved.getContent()).isEqualTo("Next.js로 프론트엔드 기술 스택 확정");
+        assertThat(saved.getMeeting()).isEqualTo(meeting);
+        assertThat(saved.getProject()).isEqualTo(project);
+    }
+
+    @Test
+    void analyze_decisions_여러개일때_모두저장() throws Exception {
+        // given
+        Project project = Project.builder().name("테스트 프로젝트").build();
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
+
+        String glmResponse = """
+                {
+                  "summary": "요약",
+                  "unresolvedItems": null,
+                  "worklogs": [],
+                  "decisions": [
+                    { "content": "결정 사항 1" },
+                    { "content": "결정 사항 2" }
+                  ]
+                }
+                """;
+
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
+        given(objectMapper.readValue(anyString(), any(Class.class)))
+                .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
+
+        // when
+        service.analyze(1L);
+
+        // then
+        verify(decisionRepository, times(2)).save(any(Decision.class));
+    }
+
+    @Test
+    void analyze_project없을때_decision_저장_스킵() throws Exception {
+        // given
+        Meeting meeting = Meeting.builder().title("프로젝트 없는 회의").build(); // project = null
+
+        String glmResponse = """
+                {
+                  "summary": "요약",
+                  "unresolvedItems": null,
+                  "worklogs": [],
+                  "decisions": [
+                    { "content": "저장되면 안 되는 결정 사항" }
+                  ]
+                }
+                """;
+
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
+        given(objectMapper.readValue(anyString(), any(Class.class)))
+                .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
+
+        // when
+        service.analyze(1L);
+
+        // then
+        verify(decisionRepository, never()).save(any(Decision.class));
     }
 }
