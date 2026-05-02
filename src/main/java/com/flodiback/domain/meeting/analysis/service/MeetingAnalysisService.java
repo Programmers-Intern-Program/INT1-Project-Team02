@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flodiback.domain.decision.decision.entity.Decision;
+import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
@@ -45,6 +47,7 @@ public class MeetingAnalysisService {
     private final ContextCacheRepository contextCacheRepository;
     private final UtteranceRepository utteranceRepository;
     private final MeetingSummaryRepository meetingSummaryRepository;
+    private final DecisionRepository decisionRepository;
     private final GlmClient glmClient;
     private final ObjectMapper objectMapper;
 
@@ -71,9 +74,17 @@ public class MeetingAnalysisService {
         // TODO: WorkLogService 구현 후 연동
         // result.worklogs().forEach(item -> ...);
 
-        // 6. Decision 저장 (스켈레톤)
-        // TODO: DecisionService 구현 후 연동 (embedding 포함)
-        // result.decisions().forEach(item -> ...);
+        // 6. Decision 저장
+        if (meeting.getProject() != null) {
+            result.decisions().forEach(item -> {
+                Decision decision = Decision.builder()
+                        .project(meeting.getProject())
+                        .meeting(meeting)
+                        .content(item.content())
+                        .build();
+                decisionRepository.save(decision);
+            });
+        }
     }
 
     private String buildContext(Meeting meeting) {
