@@ -7,6 +7,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -27,7 +28,7 @@ import com.flodiback.global.client.GlmClient;
  *
  * <p>샘플 회의록 추가 시 {@code SAMPLES} 맵에 한 줄만 추가하면 됩니다.
  */
-// @Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
+@Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
 @SpringBootTest
 class MeetingAnalysisManualTest {
 
