@@ -4,6 +4,10 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,10 +37,13 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final long LOG_INTERVAL_PACKETS = 50;
     // 이 시간(ms) 동안 화자 오디오가 없으면 해당 STT 세션을 종료한다.
     private static final long STT_SILENCE_END_MS = 1500L;
+    // 무음 종료 감시 주기(ms)
+    private static final long STT_SILENCE_WATCH_INTERVAL_MS = 250L;
 
     private final long guildId;
     private final long meetingId;
     private final SttProvider sttProvider;
+    private final ScheduledExecutorService silenceWatcher;
 
     // 사용자 ID별 누적 통계
     private final Map<Long, SpeakerStats> statsByUserId = new ConcurrentHashMap<>();
@@ -64,6 +71,12 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         this.guildId = guildId;
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
+        this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
+        this.silenceWatcher.scheduleAtFixedRate(
+                this::endInactiveSttSessionsOnSchedule,
+                STT_SILENCE_WATCH_INTERVAL_MS,
+                STT_SILENCE_WATCH_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -143,9 +156,6 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             }
         }
 
-        // 현재 화자 외 세션 중 무음 초과 세션을 정리한다.
-        endInactiveSttSessions(now, userId);
-
         if (firstEncodedLogged.compareAndSet(false, true)) {
             log.info("[음성/인코드첫수신] guildId={}, firstUserId={}, encodedPackets={}", guildId, userId, encodedCount);
         }
@@ -211,6 +221,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * 길드 음성 세션을 명시적으로 종료할 때(예: !leave) 모든 STT 세션을 end(commit)한다.
      */
     public void closeAllSttSessions() {
+        silenceWatcher.shutdownNow();
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
             ActiveSttSession activeSession = entry.getValue();
@@ -368,18 +379,12 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     /**
      * 무음 세션을 종료한다.
      *
-     * @param now 현재 시각(ms)
-     * @param speakingUserId 지금 오디오가 들어온 사용자 ID(해당 사용자는 종료 제외)
-     * @implNote 현재 구현은 "오디오 패킷이 들어올 때" 무음 체크를 수행한다.
-     *     따라서 완전 무음 상태에서는 다음 패킷 또는 !leave 시점에 종료가 반영된다.
+     * @implNote 스케줄러가 주기적으로 검사하므로, 다른 사용자의 패킷 도착 여부와 무관하게 종료된다.
      */
-    private void endInactiveSttSessions(long now, long speakingUserId) {
+    private void endInactiveSttSessionsOnSchedule() {
+        long now = System.currentTimeMillis();
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
-            if (userId == speakingUserId) {
-                continue;
-            }
-
             ActiveSttSession session = entry.getValue();
             long silenceMs = now - session.lastAudioAtMs.get();
             if (silenceMs < STT_SILENCE_END_MS) {
@@ -456,6 +461,21 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             this.sessionId = sessionId;
             this.speakerId = speakerId;
             this.lastAudioAtMs.set(startedAtMs);
+        }
+    }
+
+    private static final class SilenceWatcherThreadFactory implements ThreadFactory {
+        private final long guildId;
+
+        private SilenceWatcherThreadFactory(long guildId) {
+            this.guildId = guildId;
+        }
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "stt-silence-watcher-guild-" + guildId);
+            thread.setDaemon(true);
+            return thread;
         }
     }
 
