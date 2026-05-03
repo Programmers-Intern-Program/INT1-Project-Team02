@@ -11,6 +11,11 @@ final class OpenAiPcmConverter {
     private static final int INPUT_CHANNELS = 2;
     private static final int INPUT_FRAME_BYTES = PCM_16BIT_BYTES * INPUT_CHANNELS;
     private static final int DOWNSAMPLE_FACTOR = 2;
+    // 48k -> 24k decimation 전에 적용할 저역통과 FIR(정규화 합=64)
+    // binomial 계열 계수로 구현이 단순하고 alias 억제에 유리하다.
+    private static final int[] FIR_TAPS = {1, 6, 15, 20, 15, 6, 1};
+    private static final int FIR_NORMALIZATION = 64;
+    private static final int FIR_HALF = FIR_TAPS.length / 2;
     private static final AtomicOnce WARN_ONCE = new AtomicOnce();
 
     byte[] toRealtimePcm16(byte[] jdaPcm) {
@@ -35,18 +40,38 @@ final class OpenAiPcmConverter {
             log.debug("Ignoring trailing PCM bytes that do not fill a frame. bytes={}", truncatedBytes);
         }
 
+        short[] mono48k = extractMono48k(jdaPcm, completeInputFrames);
         byte[] output = new byte[outputFrames * PCM_16BIT_BYTES];
         for (int outputFrameIndex = 0; outputFrameIndex < outputFrames; outputFrameIndex++) {
-            int inputFrameIndex = outputFrameIndex * DOWNSAMPLE_FACTOR;
-
-            int monoSampleA = mixStereoFrameToMono(jdaPcm, inputFrameIndex);
-            int monoSampleB = mixStereoFrameToMono(jdaPcm, inputFrameIndex + 1);
-            short downsampledMono = clampToShort((monoSampleA + monoSampleB) / 2);
-
-            writeLittleEndianShort(output, outputFrameIndex * PCM_16BIT_BYTES, downsampledMono);
+            int sourceIndex = outputFrameIndex * DOWNSAMPLE_FACTOR;
+            short filtered = lowPassAt(mono48k, sourceIndex);
+            writeLittleEndianShort(output, outputFrameIndex * PCM_16BIT_BYTES, filtered);
         }
 
         return output;
+    }
+
+    private short[] extractMono48k(byte[] pcm, int frameCount) {
+        short[] mono = new short[frameCount];
+        for (int frame = 0; frame < frameCount; frame++) {
+            mono[frame] = (short) mixStereoFrameToMono(pcm, frame);
+        }
+        return mono;
+    }
+
+    private short lowPassAt(short[] mono, int center) {
+        long accumulator = 0L;
+        for (int tap = 0; tap < FIR_TAPS.length; tap++) {
+            int index = center + tap - FIR_HALF;
+            if (index < 0) {
+                index = 0;
+            } else if (index >= mono.length) {
+                index = mono.length - 1;
+            }
+            accumulator += (long) FIR_TAPS[tap] * mono[index];
+        }
+        int filtered = (int) Math.round(accumulator / (double) FIR_NORMALIZATION);
+        return clampToShort(filtered);
     }
 
     private int mixStereoFrameToMono(byte[] pcm, int frameIndex) {
