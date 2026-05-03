@@ -1,3 +1,5 @@
 package com.flodiback.domain.meeting.analysis.dto;
 
-public record WorkLogItem(String assigneeName, String task, String dueDate) {}
+import java.time.LocalDate;
+
+public record WorkLogItem(String assigneeName, String task, LocalDate dueDate) {}

@@ -16,7 +16,7 @@ public class OpenAiEmbeddingClient {
 
     private final RestClient restClient;
 
-    public OpenAiEmbeddingClient(@Value("${openai.api-key}") String apiKey) {
+    public OpenAiEmbeddingClient(@Value("${openai.embedding.api-key}") String apiKey) {
         this.restClient = RestClient.builder()
                 .baseUrl("https://api.openai.com/v1")
                 .defaultHeader("Authorization", "Bearer " + apiKey)

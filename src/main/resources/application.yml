@@ -36,6 +36,8 @@ spring:
 
 openai:
   api-key: ${OPENAI_API_KEY}
+  embedding:
+    api-key: ${OPENAI_EMBEDDING_API_KEY:}
 glm:
   enabled: ${GLM_ENABLED:false}
   api:

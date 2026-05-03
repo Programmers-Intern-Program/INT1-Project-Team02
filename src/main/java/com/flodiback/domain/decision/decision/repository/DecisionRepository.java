@@ -16,6 +16,8 @@ public interface DecisionRepository extends JpaRepository<Decision, Long> {
 
     List<Decision> findByProjectIdOrderByIdAsc(Long projectId);
 
+    List<Decision> findTop5ByProjectIdOrderByIdDesc(Long projectId);
+
     Optional<Decision> findByIdAndProjectId(Long id, Long projectId);
 
     @Modifying

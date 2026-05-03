@@ -46,6 +46,7 @@ public class ContextService {
     private final WorkLogRepository workLogRepository;
     private final OpenAiEmbeddingClient embeddingClient;
     private final DecisionEmbeddingService decisionEmbeddingService;
+    private final MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
 
     public ContextResponse assemble(Long meetingId, String question) {
         Meeting meeting = meetingRepository
@@ -61,7 +62,7 @@ public class ContextService {
         }
 
         List<Decision> decisions = resolveDecisions(project.getId(), question);
-        List<MeetingSummary> pastSummaries = meetingSummaryRepository.findPastByProjectId(project.getId(), meetingId);
+        List<MeetingSummary> pastSummaries = resolvePastSummaries(project.getId(), meetingId, question);
 
         return ContextResponse.of(project, recentUtterances, decisions, pastSummaries);
     }
@@ -75,12 +76,17 @@ public class ContextService {
         Meeting meeting = meetingRepository
                 .findById(req.meetingId())
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
+        if (meeting.getProject() == null
+                || !projectId.equals(meeting.getProject().getId())) {
+            throw new ServiceException("400-1", "회의가 요청한 프로젝트에 속하지 않습니다.");
+        }
 
-        meetingSummaryRepository.save(MeetingSummary.builder()
+        MeetingSummary savedSummary = meetingSummaryRepository.save(MeetingSummary.builder()
                 .meeting(meeting)
                 .summary(req.summary())
                 .unresolvedItems(req.unresolvedItems())
                 .build());
+        meetingSummaryEmbeddingService.processEmbedding(savedSummary);
 
         if (req.decisions() != null) {
             req.decisions().forEach(content -> {
@@ -118,6 +124,22 @@ public class ContextService {
         } catch (Exception e) {
             log.warn("하이브리드 서치 실패, 전체 결정사항으로 폴백 - projectId={}: {}", projectId, e.getMessage());
             return decisionRepository.findByProjectIdOrderByIdAsc(projectId);
+        }
+    }
+
+    private List<MeetingSummary> resolvePastSummaries(Long projectId, Long meetingId, String question) {
+        if (question == null || question.isBlank()) {
+            return meetingSummaryRepository.findLatestPastByProjectId(projectId, meetingId, TOP_K);
+        }
+
+        try {
+            float[] raw = embeddingClient.embed(question);
+            String embeddingStr = new PGvector(raw).getValue();
+            return meetingSummaryRepository.hybridSearch(
+                    projectId, meetingId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT);
+        } catch (Exception e) {
+            log.warn("회의 요약 하이브리드 서치 실패, 최신 요약으로 폴백 - projectId={}: {}", projectId, e.getMessage());
+            return meetingSummaryRepository.findLatestPastByProjectId(projectId, meetingId, TOP_K);
         }
     }
 }
