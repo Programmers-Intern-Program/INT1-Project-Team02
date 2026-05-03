@@ -18,7 +18,7 @@ final class OpenAiPcmConverter {
             return new byte[0];
         }
 
-        // JDA 디코딩 PCM은 48kHz stereo 16-bit little-endian 으로 가정한다.
+        // JDA 디코딩 PCM은 48kHz stereo 16-bit big-endian 으로 가정한다.
         // OpenAI Realtime transcription은 24kHz mono PCM을 요구하므로:
         // 1) stereo -> mono 다운믹스
         // 2) 48k -> 24k 다운샘플
@@ -30,7 +30,7 @@ final class OpenAiPcmConverter {
 
         int truncatedBytes = jdaPcm.length - (completeInputFrames * INPUT_FRAME_BYTES);
         WARN_ONCE.run(() -> log.info(
-                "OpenAiPcmConverter enabled. inputAssumption=48k_stereo_pcm16le, outputFormat=24k_mono_pcm16le"));
+                "OpenAiPcmConverter enabled. inputAssumption=48k_stereo_pcm16be, outputFormat=24k_mono_pcm16le"));
         if (truncatedBytes > 0) {
             log.debug("Ignoring trailing PCM bytes that do not fill a frame. bytes={}", truncatedBytes);
         }
@@ -51,14 +51,14 @@ final class OpenAiPcmConverter {
 
     private int mixStereoFrameToMono(byte[] pcm, int frameIndex) {
         int offset = frameIndex * INPUT_FRAME_BYTES;
-        short left = readLittleEndianShort(pcm, offset);
-        short right = readLittleEndianShort(pcm, offset + PCM_16BIT_BYTES);
+        short left = readBigEndianShort(pcm, offset);
+        short right = readBigEndianShort(pcm, offset + PCM_16BIT_BYTES);
         return (left + right) / 2;
     }
 
-    private short readLittleEndianShort(byte[] pcm, int offset) {
-        int low = pcm[offset] & 0xFF;
-        int high = pcm[offset + 1];
+    private short readBigEndianShort(byte[] pcm, int offset) {
+        int high = pcm[offset];
+        int low = pcm[offset + 1] & 0xFF;
         return (short) ((high << 8) | low);
     }
 
