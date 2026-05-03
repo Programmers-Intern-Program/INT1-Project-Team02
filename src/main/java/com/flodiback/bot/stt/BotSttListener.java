@@ -5,7 +5,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -28,6 +34,10 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
  */
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
+    private static final long CAPTION_DEBOUNCE_MS = 300L;
+    private static final int CAPTION_MIN_CHARS = 2;
+    private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(new CaptionDebounceThreadFactory());
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -44,6 +54,9 @@ public class BotSttListener implements SttListener {
     private final AtomicBoolean desiredCaptionFinal = new AtomicBoolean(false);
     private final AtomicBoolean captionMessageCreating = new AtomicBoolean(false);
     private final AtomicBoolean captionEditInFlight = new AtomicBoolean(false);
+    private final AtomicReference<ScheduledFuture<?>> pendingPartialTask = new AtomicReference<>();
+    private final AtomicReference<String> pendingPartialText = new AtomicReference<>("");
+    private final AtomicLong pendingPartialVersion = new AtomicLong();
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName) {
         this(meetingId, speakerDiscordId, speakerName, null);
@@ -64,7 +77,10 @@ public class BotSttListener implements SttListener {
         if (!result.isFinal()) {
             String partialText = result.text();
             if (partialText != null && !partialText.isBlank()) {
-                upsertLiveCaption(partialText, false);
+                int charCount = partialText.codePointCount(0, partialText.length());
+                if (charCount >= CAPTION_MIN_CHARS) {
+                    schedulePartialCaptionUpdate(partialText);
+                }
                 log.info(
                         "[STT/중간텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
                         result.sessionId(),
@@ -81,6 +97,7 @@ public class BotSttListener implements SttListener {
             return;
         }
 
+        cancelPendingPartialTask();
         upsertLiveCaption(text, true);
 
         try {
@@ -162,6 +179,8 @@ public class BotSttListener implements SttListener {
 
     @Override
     public void onError(String sessionId, Throwable throwable) {
+        cancelPendingPartialTask();
+        clearLiveCaptionMessage();
         log.warn(
                 "[STT/오류] sessionId={}, speakerId={}, meetingId={}", sessionId, speakerDiscordId, meetingId, throwable);
     }
@@ -189,6 +208,34 @@ public class BotSttListener implements SttListener {
         desiredCaptionContent.set(formatCaption(text, isFinal));
         desiredCaptionFinal.set(isFinal);
         syncLiveCaption();
+    }
+
+    private void schedulePartialCaptionUpdate(String partialText) {
+        long version = pendingPartialVersion.incrementAndGet();
+        pendingPartialText.set(partialText);
+        ScheduledFuture<?> previous = pendingPartialTask.getAndSet(CAPTION_DEBOUNCE_EXECUTOR.schedule(() -> {
+            if (version != pendingPartialVersion.get()) {
+                return;
+            }
+            String latest = pendingPartialText.getAndSet("");
+            if (latest != null && !latest.isBlank()) {
+                upsertLiveCaption(latest, false);
+            }
+            pendingPartialTask.set(null);
+        }, CAPTION_DEBOUNCE_MS, TimeUnit.MILLISECONDS));
+
+        if (previous != null) {
+            previous.cancel(false);
+        }
+    }
+
+    private void cancelPendingPartialTask() {
+        ScheduledFuture<?> pending = pendingPartialTask.getAndSet(null);
+        if (pending != null) {
+            pending.cancel(false);
+        }
+        pendingPartialText.set("");
+        pendingPartialVersion.incrementAndGet();
     }
 
     private void syncLiveCaption() {
@@ -269,5 +316,29 @@ public class BotSttListener implements SttListener {
         desiredCaptionFinal.set(false);
         captionMessageCreating.set(false);
         captionEditInFlight.set(false);
+    }
+
+    private void clearLiveCaptionMessage() {
+        String messageId = liveCaptionMessageId.get();
+        if (captionChannel != null && messageId != null) {
+            captionChannel.deleteMessageById(messageId).queue(
+                    ignored -> {},
+                    throwable -> log.debug(
+                            "[STT/자막메시지삭제실패] speakerId={}, meetingId={}, messageId={}",
+                            speakerDiscordId,
+                            meetingId,
+                            messageId,
+                            throwable));
+        }
+        clearLiveCaptionState();
+    }
+
+    private static final class CaptionDebounceThreadFactory implements ThreadFactory {
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "stt-caption-debounce");
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }

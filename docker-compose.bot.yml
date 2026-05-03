@@ -1,7 +1,7 @@
 services:
   discord-bot:
     image: eclipse-temurin:21-jdk
-    platform: linux/arm64/v8
+    platform: linux/amd64
     working_dir: /workspace
     volumes:
       - ./:/workspace
