@@ -46,6 +46,15 @@ public class BotSttListener implements SttListener {
     public void onResult(SttResult result) {
         // 중간 결과(delta)는 저장 API로 보내지 않는다.
         if (!result.isFinal()) {
+            String partialText = result.text();
+            if (partialText != null && !partialText.isBlank()) {
+                log.info(
+                        "[STT/중간텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
+                        result.sessionId(),
+                        speakerDiscordId,
+                        meetingId,
+                        partialText);
+            }
             return;
         }
 
