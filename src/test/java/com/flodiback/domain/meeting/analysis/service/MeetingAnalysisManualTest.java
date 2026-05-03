@@ -1,9 +1,12 @@
 package com.flodiback.domain.meeting.analysis.service;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -24,7 +27,7 @@ import com.flodiback.global.client.GlmClient;
  *
  * <p>샘플 회의록 추가 시 {@code SAMPLES} 맵에 한 줄만 추가하면 됩니다.
  */
-@Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
+// @Disabled("수동 실행 전용 — 토큰 소모 주의. 실행 시 @Disabled 제거")
 @SpringBootTest
 class MeetingAnalysisManualTest {
 
@@ -65,6 +68,14 @@ class MeetingAnalysisManualTest {
         return SAMPLES.entrySet().stream().map(e -> Arguments.of(e.getKey(), e.getValue()));
     }
 
+    private void writeResult(String label, String content) throws IOException {
+        Path dir = Path.of("build/glm-manual-results");
+        Files.createDirectories(dir);
+        Path file = dir.resolve(label.replaceAll("\\s+", "-") + ".txt");
+        Files.writeString(file, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        System.out.println("결과 저장: " + file.toAbsolutePath());
+    }
+
     @ParameterizedTest(name = "[{0}]")
     @MethodSource("sampleProvider")
     void 회의록_분석(String label, String transcript) throws Exception {
@@ -78,12 +89,18 @@ class MeetingAnalysisManualTest {
 
         AnalysisResult result = objectMapper.readValue(json, AnalysisResult.class);
 
-        System.out.println("\n=== [" + label + "] GLM 원본 응답 ===");
-        System.out.println(raw);
-        System.out.println("\n=== [" + label + "] 파싱 결과 ===");
-        System.out.println("summary        : " + result.summary());
-        System.out.println("unresolvedItems: " + result.unresolvedItems());
-        System.out.println("worklogs       : " + result.worklogs());
-        System.out.println("decisions      : " + result.decisions());
+        String output = """
+                === [%s] GLM 원본 응답 ===
+                %s
+
+                === [%s] 파싱 결과 ===
+                summary        : %s
+                unresolvedItems: %s
+                worklogs       : %s
+                decisions      : %s
+                """.formatted(
+                label, raw, label, result.summary(), result.unresolvedItems(), result.worklogs(), result.decisions());
+
+        writeResult(label, output);
     }
 }
