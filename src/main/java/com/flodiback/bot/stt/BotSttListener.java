@@ -68,13 +68,13 @@ public class BotSttListener implements SttListener {
 
             // 보안상 원문(text)은 로그에 남기지 않고 길이만 남긴다.
             log.info(
-                    "Final STT result received. sessionId={}, speakerId={}, meetingId={}, textLength={}",
+                    "[STT/최종결과] sessionId={}, speakerId={}, meetingId={}, textLength={}",
                     result.sessionId(),
                     speakerDiscordId,
                     meetingId,
                     text.length());
             log.info(
-                    "Final STT text. sessionId={}, speakerId={}, meetingId={}, text={}",
+                    "[STT/최종텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
                     result.sessionId(),
                     speakerDiscordId,
                     meetingId,
@@ -95,7 +95,7 @@ public class BotSttListener implements SttListener {
                     .whenComplete((response, throwable) -> {
                         if (throwable != null) {
                             log.warn(
-                                    "Failed to POST speech. sessionId={}, speakerId={}, meetingId={}",
+                                    "[전송/실패] sessionId={}, speakerId={}, meetingId={}",
                                     result.sessionId(),
                                     speakerDiscordId,
                                     meetingId,
@@ -105,7 +105,7 @@ public class BotSttListener implements SttListener {
 
                         if (response.statusCode() / 100 != 2) {
                             log.warn(
-                                    "Speech POST non-2xx. sessionId={}, speakerId={}, meetingId={}, status={}, body={}",
+                                    "[전송/비정상응답] sessionId={}, speakerId={}, meetingId={}, status={}, body={}",
                                     result.sessionId(),
                                     speakerDiscordId,
                                     meetingId,
@@ -116,7 +116,7 @@ public class BotSttListener implements SttListener {
 
                         // 보안상 원문(text)은 로그에 남기지 않는다.
                         log.info(
-                                "Speech POST success. sessionId={}, speakerId={}, meetingId={}, textLength={}",
+                                "[전송/성공] sessionId={}, speakerId={}, meetingId={}, textLength={}",
                                 result.sessionId(),
                                 speakerDiscordId,
                                 meetingId,
@@ -124,7 +124,7 @@ public class BotSttListener implements SttListener {
                     });
         } catch (Exception exception) {
             log.warn(
-                    "Failed to serialize/send speech. sessionId={}, speakerId={}, meetingId={}",
+                    "[전송/직렬화실패] sessionId={}, speakerId={}, meetingId={}",
                     result.sessionId(),
                     speakerDiscordId,
                     meetingId,
@@ -135,11 +135,7 @@ public class BotSttListener implements SttListener {
     @Override
     public void onError(String sessionId, Throwable throwable) {
         log.warn(
-                "STT error. sessionId={}, speakerId={}, meetingId={}",
-                sessionId,
-                speakerDiscordId,
-                meetingId,
-                throwable);
+                "[STT/오류] sessionId={}, speakerId={}, meetingId={}", sessionId, speakerDiscordId, meetingId, throwable);
     }
 
     private String normalizeBaseUrl(String baseUrl) {

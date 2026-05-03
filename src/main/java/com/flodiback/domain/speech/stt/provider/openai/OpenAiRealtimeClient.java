@@ -77,7 +77,7 @@ final class OpenAiRealtimeClient {
 
         sendJson(webSocket, root);
 
-        log.info("OpenAI STT session opened. sessionId={}, speakerId={}", session.sessionId(), session.speakerId());
+        log.info("[OPENAI/세션열림] sessionId={}, speakerId={}", session.sessionId(), session.speakerId());
     }
 
     /**
@@ -92,8 +92,7 @@ final class OpenAiRealtimeClient {
 
         sendJson(webSocket, event);
 
-        log.debug(
-                "OpenAI append sent. sessionId={}, bytes={}, ts={}", session.sessionId(), pcm16le.length, timestampMs);
+        log.debug("[OPENAI/오디오전송] sessionId={}, bytes={}, ts={}", session.sessionId(), pcm16le.length, timestampMs);
     }
 
     /**
@@ -106,14 +105,14 @@ final class OpenAiRealtimeClient {
         commit.put("type", "input_audio_buffer.commit");
         sendJson(webSocket, commit);
 
-        log.info("OpenAI commit sent. sessionId={}, sentBytes={}", session.sessionId(), session.sentPcmBytes());
+        log.info("[OPENAI/커밋전송] sessionId={}, sentBytes={}", session.sessionId(), session.sentPcmBytes());
 
         // completed 이벤트를 기다렸다가 닫는다.
         // 네트워크 상태에 따라 못 받을 수도 있으므로 timeout을 둔다.
         try {
             session.completedFuture().get(COMMIT_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (Exception timeoutOrError) {
-            log.warn("OpenAI completed wait timeout/error. sessionId={}", session.sessionId(), timeoutOrError);
+            log.warn("[OPENAI/커밋대기실패] sessionId={}", session.sessionId(), timeoutOrError);
         }
 
         webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();

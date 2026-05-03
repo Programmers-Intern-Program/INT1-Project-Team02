@@ -38,7 +38,7 @@ public final class DiscordBotMain {
         // canReceiveUser/Opus decode 경로는 native 준비 여부에 영향받는다.
         boolean opusReady = AudioNatives.ensureOpus();
         log.info(
-                "Audio natives status. supported={}, initialized={}, opusReady={}",
+                "[봇/오디오준비] supported={}, initialized={}, opusReady={}",
                 AudioNatives.isAudioSupported(),
                 AudioNatives.isInitialized(),
                 opusReady);
@@ -65,7 +65,7 @@ public final class DiscordBotMain {
                 .awaitReady();
 
         log.info(
-                "Discord bot ready. userId={}, username={}, prefix={}, defaultMeetingId={}",
+                "[봇/준비완료] userId={}, username={}, prefix={}, defaultMeetingId={}",
                 jda.getSelfUser().getId(),
                 jda.getSelfUser().getName(),
                 prefix,

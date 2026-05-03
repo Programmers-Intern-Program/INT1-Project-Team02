@@ -133,10 +133,11 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 // 실시간 수신 루프에서 매 프레임 warn을 찍으면 로그가 폭증하므로 샘플링한다.
                 if (failures <= 3 || failures % 200 == 0) {
                     log.warn(
-                            "Failed to decode opus packet. guildId={}, userId={}, decodeFailures={}",
+                            "[음성/디코드실패] guildId={}, userId={}, decodeFailures={}, firstReason={}",
                             guildId,
                             userId,
                             failures,
+                            firstDecodeFailureReason.get() == null ? "-" : firstDecodeFailureReason.get(),
                             decodeException);
                 }
             }
@@ -146,20 +147,19 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         endInactiveSttSessions(now, userId);
 
         if (firstEncodedLogged.compareAndSet(false, true)) {
-            log.info(
-                    "[FIRST_ENCODED_AUDIO] guildId={}, firstUserId={}, encodedPackets={}",
-                    guildId,
-                    userId,
-                    encodedCount);
+            log.info("[음성/인코드첫수신] guildId={}, firstUserId={}, encodedPackets={}", guildId, userId, encodedCount);
         }
         if (encodedCount == 1 || encodedCount % LOG_INTERVAL_PACKETS == 0) {
             log.info(
-                    "Encoded audio received. guildId={}, encodedPackets={}, userId={}, userEncodedPackets={}, canDecode={}",
+                    "[음성/인코드수신] guildId={}, encodedPackets={}, userId={}, userEncodedPackets={}, canDecode={}, decodeFailures={}, userPackets={}, activeSttSessions={}",
                     guildId,
                     encodedCount,
                     userId,
                     userEncodedPackets,
-                    canDecode);
+                    canDecode,
+                    decodeFailureCount.get(),
+                    userPacketCount.get(),
+                    activeSttSessionsByUserId.size());
         }
     }
 
@@ -178,7 +178,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         if (firstUserLogged.compareAndSet(false, true)) {
             log.info(
-                    "[FIRST_USER_AUDIO] guildId={}, userId={}, userName={}, frameBytes={}",
+                    "[음성/유저PCM첫수신] guildId={}, userId={}, userName={}, frameBytes={}",
                     guildId,
                     userId,
                     userName,
@@ -195,13 +195,15 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         if (packetCount == 1 || packetCount % LOG_INTERVAL_PACKETS == 0) {
             log.info(
-                    "Audio receive stats. guildId={}, userId={}, userName={}, userPackets={}, bytes={}, totalUserPackets={}",
+                    "[음성/유저PCM수신] guildId={}, userId={}, userName={}, userPackets={}, bytes={}, totalUserPackets={}, encodedPackets={}, decodeFailures={}",
                     guildId,
                     userId,
                     userName,
                     packetCount,
                     stats.byteCount.get(),
-                    totalUserPackets);
+                    totalUserPackets,
+                    encodedPacketCount.get(),
+                    decodeFailureCount.get());
         }
     }
 
@@ -311,7 +313,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             sttProvider.sendPcm(session.sessionId, decodedPcm, now);
         } catch (Exception sendException) {
             log.warn(
-                    "Failed to send PCM to STT. guildId={}, sessionId={}, userId={}",
+                    "[STT/PCM전달실패] guildId={}, sessionId={}, userId={}",
                     guildId,
                     session.sessionId,
                     userId,
@@ -343,7 +345,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName);
             sttProvider.startSession(sessionId, speakerId, listener);
             log.info(
-                    "STT session started. guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
+                    "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
                     guildId,
                     meetingId,
                     userId,
@@ -353,7 +355,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         } catch (Exception startException) {
             activeSttSessionsByUserId.remove(userId, created);
             log.warn(
-                    "Failed to start STT session. guildId={}, meetingId={}, userId={}, sessionId={}",
+                    "[STT/세션시작실패] guildId={}, meetingId={}, userId={}, sessionId={}",
                     guildId,
                     meetingId,
                     userId,
@@ -397,7 +399,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         try {
             sttProvider.endSession(session.sessionId);
             log.info(
-                    "STT session ended. guildId={}, meetingId={}, sessionId={}, speakerId={}, reason={}",
+                    "[STT/세션종료] guildId={}, meetingId={}, sessionId={}, speakerId={}, reason={}",
                     guildId,
                     meetingId,
                     session.sessionId,
@@ -405,7 +407,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     reason);
         } catch (Exception endException) {
             log.warn(
-                    "Failed to end STT session. guildId={}, meetingId={}, sessionId={}, reason={}",
+                    "[STT/세션종료실패] guildId={}, meetingId={}, sessionId={}, reason={}",
                     guildId,
                     meetingId,
                     session.sessionId,
@@ -430,11 +432,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 firstDecodeFailureReason.compareAndSet(null, "decodedShort is null/empty");
                 long failures = decodeFailureCount.incrementAndGet();
                 if (failures <= 3 || failures % 200 == 0) {
-                    log.warn(
-                            "Decoded short PCM is empty. guildId={}, userId={}, decodeFailures={}",
-                            guildId,
-                            userId,
-                            failures);
+                    log.warn("[음성/빈PCM] guildId={}, userId={}, decodeFailures={}", guildId, userId, failures);
                 }
                 return null;
             }

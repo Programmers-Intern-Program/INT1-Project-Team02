@@ -66,7 +66,7 @@ final class OpenAiRealtimeWsListener implements WebSocket.Listener {
 
     @Override
     public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
-        log.info("OpenAI ws closed. sessionId={}, statusCode={}, reason={}", session.sessionId(), statusCode, reason);
+        log.info("[OPENAI/소켓종료] sessionId={}, statusCode={}, reason={}", session.sessionId(), statusCode, reason);
         return CompletableFuture.completedFuture(null);
     }
 

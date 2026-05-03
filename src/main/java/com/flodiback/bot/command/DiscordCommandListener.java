@@ -109,7 +109,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .queue();
 
         log.info(
-                "Joined voice channel. guildId={}, channelId={}, channelName={}, meetingId={}",
+                "[디스코드/입장] guildId={}, channelId={}, channelName={}, meetingId={}",
                 event.getGuild().getId(),
                 targetChannel.getId(),
                 targetChannel.getName(),
@@ -131,7 +131,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         audioManager.setReceivingHandler(null);
 
         event.getChannel().sendMessage("퇴장 완료").queue();
-        log.info("Left voice channel. guildId={}", event.getGuild().getId());
+        log.info("[디스코드/퇴장] guildId={}", event.getGuild().getId());
     }
 
     private void handleStats(MessageReceivedEvent event) {
