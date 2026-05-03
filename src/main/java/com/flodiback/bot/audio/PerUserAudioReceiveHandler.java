@@ -21,6 +21,9 @@ import com.flodiback.domain.speech.stt.SttProvider;
 import net.dv8tion.jda.api.audio.AudioReceiveHandler;
 import net.dv8tion.jda.api.audio.OpusPacket;
 import net.dv8tion.jda.api.audio.UserAudio;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 
 /**
  * 길드 단위 음성 수신 핸들러.
@@ -44,6 +47,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final long meetingId;
     private final SttProvider sttProvider;
     private final ScheduledExecutorService silenceWatcher;
+    private final Guild guild;
+    private volatile MessageChannel captionChannel;
 
     // 사용자 ID별 누적 통계
     private final Map<Long, SpeakerStats> statsByUserId = new ConcurrentHashMap<>();
@@ -67,8 +72,9 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final AtomicBoolean firstEncodedLogged = new AtomicBoolean(false);
     private final AtomicBoolean firstUserLogged = new AtomicBoolean(false);
 
-    public PerUserAudioReceiveHandler(long guildId, SttProvider sttProvider, long meetingId) {
+    public PerUserAudioReceiveHandler(long guildId, Guild guild, SttProvider sttProvider, long meetingId) {
         this.guildId = guildId;
+        this.guild = Objects.requireNonNull(guild);
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
         this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
@@ -77,6 +83,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 STT_SILENCE_WATCH_INTERVAL_MS,
                 STT_SILENCE_WATCH_INTERVAL_MS,
                 TimeUnit.MILLISECONDS);
+    }
+
+    public void updateCaptionChannel(MessageChannel captionChannel) {
+        this.captionChannel = captionChannel;
     }
 
     @Override
@@ -342,7 +352,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
 
         String speakerId = Long.toString(userId);
-        String normalizedSpeakerName = (speakerName == null || speakerName.isBlank()) ? "user-" + userId : speakerName;
+        String normalizedSpeakerName = resolveSpeakerName(userId, speakerName);
         String sessionId = guildId + ":" + speakerId + ":" + now;
 
         ActiveSttSession created = new ActiveSttSession(sessionId, speakerId, now);
@@ -353,7 +363,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         try {
             // 세션 시작 시점에 결과 소비자(BotSttListener)를 함께 바인딩한다.
-            BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName);
+            BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName, captionChannel);
             sttProvider.startSession(sessionId, speakerId, listener);
             log.info(
                     "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
@@ -374,6 +384,25 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     startException);
             return null;
         }
+    }
+
+    private String resolveSpeakerName(long userId, String fallbackSpeakerName) {
+        Member member = guild.getMemberById(userId);
+        if (member != null) {
+            String effectiveName = member.getEffectiveName();
+            if (effectiveName != null && !effectiveName.isBlank()) {
+                return effectiveName;
+            }
+            String userName = member.getUser().getName();
+            if (userName != null && !userName.isBlank()) {
+                return userName;
+            }
+        }
+
+        if (fallbackSpeakerName != null && !fallbackSpeakerName.isBlank()) {
+            return fallbackSpeakerName;
+        }
+        return "user-" + userId;
     }
 
     /**

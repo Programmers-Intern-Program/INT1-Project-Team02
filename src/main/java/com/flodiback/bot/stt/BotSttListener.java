@@ -5,6 +5,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +16,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
 import com.flodiback.domain.speech.stt.SttListener;
 import com.flodiback.domain.speech.stt.SttResult;
+
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 
 /**
  * STT 결과 소비자.
@@ -33,13 +37,25 @@ public class BotSttListener implements SttListener {
     private final String speakerName;
     private final String internalBaseUrl;
     private final String internalApiKey;
+    private final MessageChannel captionChannel;
+    private final AtomicReference<String> liveCaptionMessageId = new AtomicReference<>();
+    private final AtomicReference<String> desiredCaptionContent = new AtomicReference<>("");
+    private final AtomicReference<String> renderedCaptionContent = new AtomicReference<>("");
+    private final AtomicBoolean desiredCaptionFinal = new AtomicBoolean(false);
+    private final AtomicBoolean captionMessageCreating = new AtomicBoolean(false);
+    private final AtomicBoolean captionEditInFlight = new AtomicBoolean(false);
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName) {
+        this(meetingId, speakerDiscordId, speakerName, null);
+    }
+
+    public BotSttListener(long meetingId, String speakerDiscordId, String speakerName, MessageChannel captionChannel) {
         this.meetingId = meetingId;
         this.speakerDiscordId = speakerDiscordId;
         this.speakerName = normalizeSpeakerName(speakerName, speakerDiscordId);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
+        this.captionChannel = captionChannel;
     }
 
     @Override
@@ -48,6 +64,7 @@ public class BotSttListener implements SttListener {
         if (!result.isFinal()) {
             String partialText = result.text();
             if (partialText != null && !partialText.isBlank()) {
+                upsertLiveCaption(partialText, false);
                 log.info(
                         "[STT/중간텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
                         result.sessionId(),
@@ -63,6 +80,8 @@ public class BotSttListener implements SttListener {
         if (text == null || text.isBlank()) {
             return;
         }
+
+        upsertLiveCaption(text, true);
 
         try {
             // Spring이 관리하는 ObjectMapper가 아니므로 LocalDateTime 직렬화 설정이 없다.
@@ -160,5 +179,95 @@ public class BotSttListener implements SttListener {
             return "user-" + speakerId;
         }
         return rawSpeakerName.trim();
+    }
+
+    private void upsertLiveCaption(String text, boolean isFinal) {
+        if (captionChannel == null || text == null || text.isBlank()) {
+            return;
+        }
+
+        desiredCaptionContent.set(formatCaption(text, isFinal));
+        desiredCaptionFinal.set(isFinal);
+        syncLiveCaption();
+    }
+
+    private void syncLiveCaption() {
+        String messageId = liveCaptionMessageId.get();
+        if (messageId == null) {
+            if (!captionMessageCreating.compareAndSet(false, true)) {
+                return;
+            }
+            String messageContent = desiredCaptionContent.get();
+            captionChannel
+                    .sendMessage(messageContent)
+                    .queue(
+                            message -> {
+                                liveCaptionMessageId.set(message.getId());
+                                renderedCaptionContent.set(messageContent);
+                                captionMessageCreating.set(false);
+                                if (!messageContent.equals(desiredCaptionContent.get())) {
+                                    syncLiveCaption();
+                                    return;
+                                }
+                                if (desiredCaptionFinal.get()) {
+                                    clearLiveCaptionState();
+                                }
+                            },
+                            throwable -> {
+                                captionMessageCreating.set(false);
+                                log.warn(
+                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}",
+                                        speakerDiscordId,
+                                        meetingId,
+                                        throwable);
+                            });
+            return;
+        }
+
+        String desiredContent = desiredCaptionContent.get();
+        String renderedContent = renderedCaptionContent.get();
+        if (desiredContent.equals(renderedContent)) {
+            return;
+        }
+        if (!captionEditInFlight.compareAndSet(false, true)) {
+            return;
+        }
+
+        captionChannel
+                .editMessageById(messageId, desiredContent)
+                .queue(
+                        message -> {
+                            renderedCaptionContent.set(desiredContent);
+                            captionEditInFlight.set(false);
+                            if (!desiredContent.equals(desiredCaptionContent.get())) {
+                                syncLiveCaption();
+                                return;
+                            }
+                            if (desiredCaptionFinal.get()) {
+                                clearLiveCaptionState();
+                            }
+                        },
+                        throwable -> {
+                            captionEditInFlight.set(false);
+                            log.warn(
+                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    throwable);
+                        });
+    }
+
+    private String formatCaption(String text, boolean isFinal) {
+        return "[" + speakerName + "] " + text + (isFinal ? " [final]" : "");
+    }
+
+    private void clearLiveCaptionState() {
+        liveCaptionMessageId.set(null);
+        desiredCaptionContent.set("");
+        renderedCaptionContent.set("");
+        desiredCaptionFinal.set(false);
+        captionMessageCreating.set(false);
+        captionEditInFlight.set(false);
     }
 }

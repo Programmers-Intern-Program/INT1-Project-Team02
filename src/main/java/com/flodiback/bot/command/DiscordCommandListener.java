@@ -91,7 +91,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         // (디스코드 특성상 봇 1개는 길드 내 음성 채널 1개 연결만 가능)
         PerUserAudioReceiveHandler handler = receiveHandlers.computeIfAbsent(
                 event.getGuild().getIdLong(),
-                guildId -> new PerUserAudioReceiveHandler(guildId, sttProvider, defaultMeetingId));
+                guildId -> new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, defaultMeetingId));
+        handler.updateCaptionChannel(event.getChannel());
 
         // 오디오 수신 핸들러 연결 + 음성 연결
         audioManager.setReceivingHandler(handler);
@@ -103,10 +104,13 @@ public class DiscordCommandListener extends ListenerAdapter {
         audioManager.openAudioConnection(targetChannel);
 
         event.getChannel()
-                .sendMessage("입장 완료: "
+                .sendMessage("입장 요청 완료: "
                         + targetChannel.getName()
-                        + " | status="
+                        + " | 현재상태="
                         + audioManager.getConnectionStatus()
+                        + " (오디오 연결은 비동기로 진행됨)"
+                        + ", connected="
+                        + audioManager.isConnected()
                         + ", selfMuted="
                         + audioManager.isSelfMuted()
                         + ", selfDeafened="

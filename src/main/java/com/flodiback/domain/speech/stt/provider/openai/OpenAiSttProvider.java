@@ -63,6 +63,7 @@ public class OpenAiSttProvider implements SttProvider {
         } catch (Exception exception) {
             sessions.remove(sessionId, newSession);
             nonNullListener.onError(sessionId, exception);
+            throw new IllegalStateException("Failed to open OpenAI STT session. sessionId=" + sessionId, exception);
         }
     }
 
