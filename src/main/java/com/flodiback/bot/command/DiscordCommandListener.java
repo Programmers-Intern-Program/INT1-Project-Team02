@@ -1,5 +1,10 @@
 package com.flodiback.bot.command;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -7,6 +12,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.flodiback.bot.BotEnv;
 import com.flodiback.bot.audio.PerUserAudioReceiveHandler;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
@@ -36,10 +45,14 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final String prefix;
     // 실제 STT 엔진 구현체(현재 OpenAI)
     private final SttProvider sttProvider;
-    // 기본 meetingId (현재는 단일 값 사용)
-    private final long defaultMeetingId;
+    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final String internalBaseUrl;
+    private final String internalApiKey;
     // 길드별 오디오 수신 핸들러 캐시
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
+    // 길드별 활성 meetingId
+    private final Map<Long, Long> activeMeetingIdByGuild = new ConcurrentHashMap<>();
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -48,7 +61,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     public DiscordCommandListener(String prefix, SttProvider sttProvider, long defaultMeetingId) {
         this.prefix = (prefix == null || prefix.isBlank()) ? "!" : prefix.trim();
         this.sttProvider = Objects.requireNonNull(sttProvider);
-        this.defaultMeetingId = defaultMeetingId;
+        this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
+        this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
     }
 
     @Override
@@ -84,14 +98,27 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
+        long guildId = event.getGuild().getIdLong();
+        Long meetingId = createMeeting(guildId, event.getGuild().getName());
+        if (meetingId == null) {
+            event.getChannel().sendMessage("회의 생성 실패로 입장을 중단했어. 서버 로그를 확인해줘.").queue();
+            return;
+        }
+
         AudioChannel targetChannel = member.getVoiceState().getChannel();
         AudioManager audioManager = event.getGuild().getAudioManager();
 
+        PerUserAudioReceiveHandler existing = receiveHandlers.remove(guildId);
+        if (existing != null) {
+            existing.closeAllSttSessions();
+        }
+
         // 길드별 핸들러를 1개 유지한다.
         // (디스코드 특성상 봇 1개는 길드 내 음성 채널 1개 연결만 가능)
-        PerUserAudioReceiveHandler handler = receiveHandlers.computeIfAbsent(
-                event.getGuild().getIdLong(),
-                guildId -> new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, defaultMeetingId));
+        PerUserAudioReceiveHandler handler =
+                new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, meetingId);
+        receiveHandlers.put(guildId, handler);
+        activeMeetingIdByGuild.put(guildId, meetingId);
         handler.updateCaptionChannel(event.getChannel());
 
         // 오디오 수신 핸들러 연결 + 음성 연결
@@ -122,15 +149,15 @@ public class DiscordCommandListener extends ListenerAdapter {
                 event.getGuild().getId(),
                 targetChannel.getId(),
                 targetChannel.getName(),
-                defaultMeetingId,
+                meetingId,
                 targetChannel.getMembers().size(),
                 summarizeVoiceMembers(targetChannel));
     }
 
     private void handleLeave(MessageReceivedEvent event) {
+        long guildId = event.getGuild().getIdLong();
         AudioManager audioManager = event.getGuild().getAudioManager();
-        PerUserAudioReceiveHandler handler =
-                receiveHandlers.remove(event.getGuild().getIdLong());
+        PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
 
         // leave 시점에는 열린 STT 세션을 먼저 commit/end로 닫는다.
         if (handler != null) {
@@ -142,8 +169,13 @@ public class DiscordCommandListener extends ListenerAdapter {
         audioManager.setReceivingHandler(null);
         audioManager.setConnectionListener(null);
 
+        Long meetingId = activeMeetingIdByGuild.remove(guildId);
+        if (meetingId != null) {
+            endMeeting(guildId, meetingId);
+        }
+
         event.getChannel().sendMessage("퇴장 완료").queue();
-        log.info("[디스코드/퇴장] guildId={}", event.getGuild().getId());
+        log.info("[디스코드/퇴장] guildId={}, meetingId={}", event.getGuild().getId(), meetingId);
     }
 
     private void handleStats(MessageReceivedEvent event) {
@@ -178,6 +210,80 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .limit(10)
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("-");
+    }
+
+    private Long createMeeting(long guildId, String guildName) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.putNull("projectId");
+            body.put("title", "Discord " + guildName + " " + LocalDateTime.now());
+
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+            attachInternalApiKey(requestBuilder);
+
+            HttpResponse<String> response =
+                    httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                log.warn("[미팅/생성실패] guildId={}, status={}, body={}", guildId, response.statusCode(), response.body());
+                return null;
+            }
+
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode idNode = root.path("data").path("id");
+            if (!idNode.isNumber()) {
+                log.warn("[미팅/생성응답오류] guildId={}, body={}", guildId, response.body());
+                return null;
+            }
+
+            long meetingId = idNode.asLong();
+            log.info("[미팅/생성성공] guildId={}, meetingId={}", guildId, meetingId);
+            return meetingId;
+        } catch (Exception exception) {
+            log.warn("[미팅/생성예외] guildId={}", guildId, exception);
+            return null;
+        }
+    }
+
+    private void endMeeting(long guildId, long meetingId) {
+        try {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + meetingId + "/end"))
+                    .PUT(HttpRequest.BodyPublishers.noBody());
+            attachInternalApiKey(requestBuilder);
+
+            HttpResponse<String> response =
+                    httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                log.warn(
+                        "[미팅/종료실패] guildId={}, meetingId={}, status={}, body={}",
+                        guildId,
+                        meetingId,
+                        response.statusCode(),
+                        response.body());
+                return;
+            }
+
+            log.info("[미팅/종료성공] guildId={}, meetingId={}", guildId, meetingId);
+        } catch (Exception exception) {
+            log.warn("[미팅/종료예외] guildId={}, meetingId={}", guildId, meetingId, exception);
+        }
+    }
+
+    private void attachInternalApiKey(HttpRequest.Builder requestBuilder) {
+        if (internalApiKey != null && !internalApiKey.isBlank()) {
+            requestBuilder.header("X-Internal-Api-Key", internalApiKey);
+        }
+    }
+
+    private String normalizeBaseUrl(String baseUrl) {
+        String normalized = baseUrl == null ? "http://localhost:8080" : baseUrl.trim();
+        if (normalized.endsWith("/")) {
+            return normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private final class LoggingConnectionListener implements ConnectionListener {
