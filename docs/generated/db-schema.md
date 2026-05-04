@@ -39,8 +39,12 @@
 - `meeting_id` BIGINT FK -> `meetings.id` NOT NULL
 - `speaker_name` VARCHAR(100) NOT NULL
 - `speaker_discord_id` VARCHAR(50) NOT NULL
+- `speaker_type` VARCHAR(20) NOT NULL
 - `content` TEXT NOT NULL
 - `spoken_at` TIMESTAMP NOT NULL
+- `sequence_no` BIGINT NOT NULL
+- `token_count` INT NULL
+- `created_at` TIMESTAMP NOT NULL
 
 ### `meeting_summaries`
 - `id` BIGINT PK
@@ -48,14 +52,21 @@
 - `summary` TEXT NOT NULL
 - `unresolved_items` TEXT NULL
 - `is_confirmed` BOOLEAN NOT NULL
+- `embedding` VECTOR(1536) NULL ??OpenAI text-embedding-3-small
+- `summary_tsv` TSVECTOR NULL ??tsvector ?몃━嫄??먮룞 媛깆떊 (?섏씠釉뚮━???쒖튂??
 - `created_at` TIMESTAMP NOT NULL
+- INDEX: `idx_meeting_summaries_embedding` HNSW (m=16, ef_construction=64)
+- INDEX: `idx_meeting_summaries_tsv` GIN
 
 ### `context_cache`
 - `id` BIGINT PK
 - `meeting_id` BIGINT FK -> `meetings.id` NOT NULL
+- `version` INT NOT NULL
 - `compressed_text` TEXT NOT NULL
 - `token_count` INT NOT NULL
-- `turn_range` VARCHAR(50) NOT NULL
+- `start_sequence_no` BIGINT NOT NULL
+- `end_sequence_no` BIGINT NOT NULL
+- `compressed_until_created_at` TIMESTAMP NULL
 - `created_at` TIMESTAMP NOT NULL
 
 ### `decisions`

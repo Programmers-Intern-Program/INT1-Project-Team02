@@ -32,7 +32,7 @@ class ContextControllerTest {
 
     @BeforeEach
     void setUp() {
-        stubResponse = ContextResponse.noProject(Collections.emptyList());
+        stubResponse = ContextResponse.noProject(null, Collections.emptyList());
         given(contextService.assemble(anyLong(), any())).willReturn(stubResponse);
     }
 

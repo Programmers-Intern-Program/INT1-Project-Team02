@@ -48,7 +48,7 @@ class SpeechAiAnswerServiceTest {
     @Test
     void generateAnswerIfCalled_usesContextAndAiChat_whenWakeWordExists() {
         ContextResponse context = new ContextResponse(
-                new ShortTermContext(List.of(new UtteranceSummary("김철수", "인증은 JWT로 하죠.", null))),
+                new ShortTermContext(null, List.of(new UtteranceSummary("김철수", "인증은 JWT로 하죠.", null))),
                 new LongTermContext(
                         "Flodi",
                         "Spring Boot",
@@ -85,7 +85,7 @@ class SpeechAiAnswerServiceTest {
 
     @Test
     void generateAnswerIfCalled_returnsNull_whenAiChatFails() {
-        ContextResponse context = ContextResponse.noProject(List.of());
+        ContextResponse context = ContextResponse.noProject(null, List.of());
         given(contextService.assemble(1L, "토큰 만료 시간 정했어?")).willReturn(context);
         given(aiChatService.generateAnswer(anyString(), anyString())).willThrow(new RuntimeException("GLM error"));
 

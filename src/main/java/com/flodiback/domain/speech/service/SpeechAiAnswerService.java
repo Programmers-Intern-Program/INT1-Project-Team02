@@ -100,6 +100,9 @@ public class SpeechAiAnswerService {
         prompt.append("\n[과거 회의 요약]\n");
         appendPastSummaries(prompt, context.longTerm().pastSummaries());
 
+        prompt.append("\n[현재 회의 요약]\n");
+        appendRollingSummary(prompt, context.shortTerm().rollingSummary());
+
         prompt.append("\n[최근 회의 대화]\n");
         appendRecentUtterances(prompt, context.shortTerm().recentUtterances());
 
@@ -137,6 +140,14 @@ public class SpeechAiAnswerService {
                 .append(" (")
                 .append(summary.createdAt())
                 .append(")\n"));
+    }
+
+    private void appendRollingSummary(StringBuilder prompt, String rollingSummary) {
+        if (!StringUtils.hasText(rollingSummary)) {
+            prompt.append("- 없음\n");
+            return;
+        }
+        prompt.append(rollingSummary.strip()).append("\n");
     }
 
     private void appendRecentUtterances(StringBuilder prompt, List<UtteranceSummary> recentUtterances) {

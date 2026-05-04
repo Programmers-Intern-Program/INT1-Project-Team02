@@ -4,16 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -23,7 +26,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
+import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
@@ -49,6 +54,9 @@ class ContextServiceTest {
     private UtteranceRepository utteranceRepository;
 
     @Mock
+    private ContextCacheRepository contextCacheRepository;
+
+    @Mock
     private DecisionRepository decisionRepository;
 
     @Mock
@@ -71,6 +79,13 @@ class ContextServiceTest {
 
     @InjectMocks
     private ContextService contextService;
+
+    @BeforeEach
+    void setUp() {
+        lenient()
+                .when(contextCacheRepository.findTopByMeetingOrderByVersionDesc(any(Meeting.class)))
+                .thenReturn(Optional.empty());
+    }
 
     // ── assemble() ──────────────────────────────────────────────────────────
 
@@ -124,6 +139,83 @@ class ContextServiceTest {
                 .map(us -> us.speakerName())
                 .toList();
         assertThat(names).containsExactly("Alice", "Bob", "Carol");
+    }
+
+    @Test
+    void assemble_latestContextCache_있으면_rollingSummary와_cache이후_최신20개를_반환() {
+        Meeting meeting = mock(Meeting.class);
+        given(meeting.getProject()).willReturn(null);
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        ContextCache cache = ContextCache.builder()
+                .meeting(meeting)
+                .version(1)
+                .compressedText("이전까지 인증과 배포를 논의했다.")
+                .startSequenceNo(1L)
+                .endSequenceNo(10L)
+                .tokenCount(100)
+                .build();
+        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
+                .willReturn(Optional.of(cache));
+        List<Utterance> utterances = new ArrayList<>();
+        for (long i = 11; i <= 31; i++) {
+            utterances.add(Utterance.builder()
+                    .meeting(meeting)
+                    .speakerName("speaker-" + i)
+                    .speakerDiscordId("discord-" + i)
+                    .content("content-" + i)
+                    .sequenceNo(i)
+                    .build());
+        }
+        given(utteranceRepository.findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(meeting, 10L))
+                .willReturn(utterances);
+
+        ContextResponse result = contextService.assemble(1L, null);
+
+        assertThat(result.shortTerm().rollingSummary()).isEqualTo("이전까지 인증과 배포를 논의했다.");
+        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
+        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
+        assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
+    }
+
+    @Test
+    void assemble_latestContextCache_createdAtWatermark_있으면_createdAt이후_tail을_반환() {
+        Meeting meeting = mock(Meeting.class);
+        given(meeting.getProject()).willReturn(null);
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        LocalDateTime compressedUntil = LocalDateTime.of(2026, 5, 4, 11, 59, 0);
+        ContextCache cache = ContextCache.builder()
+                .meeting(meeting)
+                .version(2)
+                .compressedText("created-at summary")
+                .startSequenceNo(1L)
+                .endSequenceNo(10L)
+                .tokenCount(100)
+                .compressedUntilCreatedAt(compressedUntil)
+                .build();
+        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
+                .willReturn(Optional.of(cache));
+        List<Utterance> utterances = new ArrayList<>();
+        for (long i = 11; i <= 31; i++) {
+            utterances.add(Utterance.builder()
+                    .meeting(meeting)
+                    .speakerName("speaker-" + i)
+                    .speakerDiscordId("discord-" + i)
+                    .content("content-" + i)
+                    .spokenAt(LocalDateTime.of(2026, 5, 4, 10, 0).plusSeconds(i))
+                    .sequenceNo(i)
+                    .createdAt(compressedUntil.plusSeconds(i))
+                    .build());
+        }
+        given(utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
+                        meeting, compressedUntil))
+                .willReturn(utterances);
+
+        ContextResponse result = contextService.assemble(1L, null);
+
+        assertThat(result.shortTerm().rollingSummary()).isEqualTo("created-at summary");
+        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
+        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
+        assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
     }
 
     @Test

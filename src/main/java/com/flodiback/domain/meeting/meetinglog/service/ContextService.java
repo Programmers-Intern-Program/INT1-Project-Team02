@@ -9,7 +9,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
+import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
 import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
@@ -37,9 +39,11 @@ public class ContextService {
     private static final double SEMANTIC_WEIGHT = 0.7;
     private static final double KEYWORD_WEIGHT = 0.3;
     private static final int TOP_K = 5;
+    private static final int RECENT_UTTERANCE_LIMIT = 20;
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
+    private final ContextCacheRepository contextCacheRepository;
     private final DecisionRepository decisionRepository;
     private final MeetingSummaryRepository meetingSummaryRepository;
     private final ProjectRepository projectRepository;
@@ -53,18 +57,48 @@ public class ContextService {
                 .findById(meetingId)
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
 
-        List<Utterance> recentUtterances = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meetingId);
-        Collections.reverse(recentUtterances);
+        ShortTermParts shortTerm = resolveShortTerm(meeting, meetingId);
 
         Project project = meeting.getProject();
         if (project == null) {
-            return ContextResponse.noProject(recentUtterances);
+            return ContextResponse.noProject(shortTerm.rollingSummary(), shortTerm.recentUtterances());
         }
 
         List<Decision> decisions = resolveDecisions(project.getId(), question);
         List<MeetingSummary> pastSummaries = resolvePastSummaries(project.getId(), meetingId, question);
 
-        return ContextResponse.of(project, recentUtterances, decisions, pastSummaries);
+        return ContextResponse.of(
+                project, shortTerm.rollingSummary(), shortTerm.recentUtterances(), decisions, pastSummaries);
+    }
+
+    private ShortTermParts resolveShortTerm(Meeting meeting, Long meetingId) {
+        ContextCache latestCache = contextCacheRepository
+                .findTopByMeetingOrderByVersionDesc(meeting)
+                .orElse(null);
+        if (latestCache == null) {
+            List<Utterance> recentUtterances = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meetingId);
+            Collections.reverse(recentUtterances);
+            return new ShortTermParts(null, recentUtterances);
+        }
+
+        List<Utterance> utterancesAfterCache;
+        if (latestCache.getCompressedUntilCreatedAt() != null) {
+            utterancesAfterCache =
+                    utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
+                            meeting, latestCache.getCompressedUntilCreatedAt());
+        } else {
+            utterancesAfterCache = utteranceRepository.findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(
+                    meeting, latestCache.getEndSequenceNo());
+        }
+        return new ShortTermParts(
+                latestCache.getCompressedText(), takeLatest(utterancesAfterCache, RECENT_UTTERANCE_LIMIT));
+    }
+
+    private List<Utterance> takeLatest(List<Utterance> utterances, int limit) {
+        if (utterances.size() <= limit) {
+            return utterances;
+        }
+        return utterances.subList(utterances.size() - limit, utterances.size());
     }
 
     @Transactional
@@ -142,4 +176,6 @@ public class ContextService {
             return meetingSummaryRepository.findLatestPastByProjectId(projectId, meetingId, TOP_K);
         }
     }
+
+    private record ShortTermParts(String rollingSummary, List<Utterance> recentUtterances) {}
 }
