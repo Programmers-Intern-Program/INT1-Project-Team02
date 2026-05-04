@@ -5,12 +5,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -353,7 +353,9 @@ public class BotSttListener implements SttListener {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
             JsonNode aiAnswerNode = root.path("data").path("ai_answer");
-            boolean hasAiAnswer = !aiAnswerNode.isMissingNode() && !aiAnswerNode.isNull() && !aiAnswerNode.asText().isBlank();
+            boolean hasAiAnswer = !aiAnswerNode.isMissingNode()
+                    && !aiAnswerNode.isNull()
+                    && !aiAnswerNode.asText().isBlank();
             int aiAnswerLength = hasAiAnswer ? aiAnswerNode.asText().length() : 0;
             log.info(
                     "[AI/응답체크] sessionId={}, speakerId={}, meetingId={}, wakeWordDetected={}, hasAiAnswer={}, aiAnswerLength={}",
