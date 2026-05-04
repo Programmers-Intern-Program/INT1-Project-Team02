@@ -1,10 +1,10 @@
 package com.flodiback.bot.audio;
 
-import java.util.Comparator;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Deque;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -309,15 +309,15 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     + decodedPcmPackets
                     + ", decodedFromEncodedBytes="
                     + decodedPcmBytes
-                + ", activeSttSessions="
-                + activeSttSessionsByUserId.size()
-                + ", vadStartThreshold="
-                + vadStartThreshold.get()
-                + ", vadEndThreshold="
-                + vadEndThreshold.get()
-                + ", firstDecodeFailureReason="
-                + (decodeFailureReason == null ? "-" : decodeFailureReason)
-                + ")";
+                    + ", activeSttSessions="
+                    + activeSttSessionsByUserId.size()
+                    + ", vadStartThreshold="
+                    + vadStartThreshold.get()
+                    + ", vadEndThreshold="
+                    + vadEndThreshold.get()
+                    + ", firstDecodeFailureReason="
+                    + (decodeFailureReason == null ? "-" : decodeFailureReason)
+                    + ")";
         }
 
         StringBuilder builder = new StringBuilder("화자별 수신 통계 (encodedPackets="
@@ -451,7 +451,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         if (fallbackSpeakerName != null && !fallbackSpeakerName.isBlank()) {
             return fallbackSpeakerName;
         }
-            return "user-" + userId;
+        return "user-" + userId;
     }
 
     private void sendToActiveSession(ActiveSttSession session, long userId, byte[] pcm, long now) {
@@ -538,14 +538,12 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         ActiveSttSession activeSession = activeSttSessionsByUserId.get(userId);
         long startThreshold = vadStartThreshold.get();
         long endThreshold = vadEndThreshold.get();
-        boolean startSpeech =
-                speechEvidence.webRtcAvailable
-                        ? speechEvidence.webRtcScore >= VAD_START_PROB_THRESHOLD
-                        : speechEvidence.rms >= startThreshold;
-        boolean continueSpeech =
-                speechEvidence.webRtcAvailable
-                        ? speechEvidence.webRtcScore >= VAD_END_PROB_THRESHOLD
-                        : speechEvidence.rms >= endThreshold;
+        boolean startSpeech = speechEvidence.webRtcAvailable
+                ? speechEvidence.webRtcScore >= VAD_START_PROB_THRESHOLD
+                : speechEvidence.rms >= startThreshold;
+        boolean continueSpeech = speechEvidence.webRtcAvailable
+                ? speechEvidence.webRtcScore >= VAD_END_PROB_THRESHOLD
+                : speechEvidence.rms >= endThreshold;
 
         if (activeSession != null) {
             if (continueSpeech) {

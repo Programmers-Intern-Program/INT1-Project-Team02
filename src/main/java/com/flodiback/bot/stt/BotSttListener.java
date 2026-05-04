@@ -213,16 +213,19 @@ public class BotSttListener implements SttListener {
     private void schedulePartialCaptionUpdate(String partialText) {
         long version = pendingPartialVersion.incrementAndGet();
         pendingPartialText.set(partialText);
-        ScheduledFuture<?> previous = pendingPartialTask.getAndSet(CAPTION_DEBOUNCE_EXECUTOR.schedule(() -> {
-            if (version != pendingPartialVersion.get()) {
-                return;
-            }
-            String latest = pendingPartialText.getAndSet("");
-            if (latest != null && !latest.isBlank()) {
-                upsertLiveCaption(latest, false);
-            }
-            pendingPartialTask.set(null);
-        }, CAPTION_DEBOUNCE_MS, TimeUnit.MILLISECONDS));
+        ScheduledFuture<?> previous = pendingPartialTask.getAndSet(CAPTION_DEBOUNCE_EXECUTOR.schedule(
+                () -> {
+                    if (version != pendingPartialVersion.get()) {
+                        return;
+                    }
+                    String latest = pendingPartialText.getAndSet("");
+                    if (latest != null && !latest.isBlank()) {
+                        upsertLiveCaption(latest, false);
+                    }
+                    pendingPartialTask.set(null);
+                },
+                CAPTION_DEBOUNCE_MS,
+                TimeUnit.MILLISECONDS));
 
         if (previous != null) {
             previous.cancel(false);
@@ -321,14 +324,16 @@ public class BotSttListener implements SttListener {
     private void clearLiveCaptionMessage() {
         String messageId = liveCaptionMessageId.get();
         if (captionChannel != null && messageId != null) {
-            captionChannel.deleteMessageById(messageId).queue(
-                    ignored -> {},
-                    throwable -> log.debug(
-                            "[STT/자막메시지삭제실패] speakerId={}, meetingId={}, messageId={}",
-                            speakerDiscordId,
-                            meetingId,
-                            messageId,
-                            throwable));
+            captionChannel
+                    .deleteMessageById(messageId)
+                    .queue(
+                            ignored -> {},
+                            throwable -> log.debug(
+                                    "[STT/자막메시지삭제실패] speakerId={}, meetingId={}, messageId={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    throwable));
         }
         clearLiveCaptionState();
     }
