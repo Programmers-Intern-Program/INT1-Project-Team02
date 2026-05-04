@@ -12,11 +12,13 @@ public record ContextResponse(ShortTermContext shortTerm, LongTermContext longTe
 
     public static ContextResponse of(
             Project project,
+            String rollingSummary,
             List<Utterance> recentUtterances,
             List<Decision> decisions,
             List<MeetingSummary> pastSummaries) {
 
         ShortTermContext shortTerm = new ShortTermContext(
+                rollingSummary,
                 recentUtterances.stream().map(UtteranceSummary::from).toList());
 
         LongTermContext longTerm = new LongTermContext(
@@ -29,8 +31,9 @@ public record ContextResponse(ShortTermContext shortTerm, LongTermContext longTe
         return new ContextResponse(shortTerm, longTerm);
     }
 
-    public static ContextResponse noProject(List<Utterance> recentUtterances) {
+    public static ContextResponse noProject(String rollingSummary, List<Utterance> recentUtterances) {
         ShortTermContext shortTerm = new ShortTermContext(
+                rollingSummary,
                 recentUtterances.stream().map(UtteranceSummary::from).toList());
 
         LongTermContext longTerm =

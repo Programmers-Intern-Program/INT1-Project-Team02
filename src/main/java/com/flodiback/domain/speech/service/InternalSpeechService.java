@@ -1,12 +1,15 @@
 package com.flodiback.domain.speech.service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
+import com.flodiback.domain.meeting.meetinglog.rolling.UtteranceSavedEvent;
 import com.flodiback.domain.speech.dto.InternalSpeechRequest;
 import com.flodiback.domain.speech.dto.InternalSpeechResponse;
 import com.flodiback.global.exception.ServiceException;
@@ -20,6 +23,7 @@ public class InternalSpeechService {
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
     private final SpeechAiAnswerService speechAiAnswerService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public InternalSpeechResponse saveSpeech(InternalSpeechRequest request) {
@@ -33,6 +37,7 @@ public class InternalSpeechService {
         long sequenceNo = utteranceRepository.countByMeeting(meeting) + 1;
 
         // Discord 봇이 넘긴 발화 시각을 spoken_at으로 저장한다.
+        int tokenCount = estimateTokenCount(request.text());
         Utterance utterance = Utterance.builder()
                 .meeting(meeting)
                 .speakerDiscordId(request.speakerDiscordId())
@@ -40,13 +45,23 @@ public class InternalSpeechService {
                 .content(request.text())
                 .spokenAt(request.timestamp())
                 .sequenceNo(sequenceNo)
+                .tokenCount(tokenCount)
                 .build();
 
         Utterance savedUtterance = utteranceRepository.save(utterance);
+        eventPublisher.publishEvent(
+                new UtteranceSavedEvent(meeting.getId(), savedUtterance.getId(), sequenceNo, tokenCount));
 
         // 호출어가 있는 발화라면 회의 컨텍스트와 GLM을 사용해 봇이 출력할 답변을 만든다.
         String aiAnswer = speechAiAnswerService.generateAnswerIfCalled(meeting.getId(), request.text());
 
         return new InternalSpeechResponse(savedUtterance.getId(), meeting.getId(), aiAnswer);
+    }
+
+    private int estimateTokenCount(String text) {
+        if (!StringUtils.hasText(text)) {
+            return 0;
+        }
+        return Math.max(1, text.length() / 4);
     }
 }

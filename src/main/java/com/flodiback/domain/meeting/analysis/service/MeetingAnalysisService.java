@@ -8,15 +8,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
+import com.flodiback.domain.meeting.analysis.dto.DecisionItem;
+import com.flodiback.domain.meeting.analysis.dto.WorkLogItem;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
-import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
+import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
-import com.flodiback.domain.meeting.meetinglog.repository.MeetingSummaryRepository;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
+import com.flodiback.domain.meeting.meetinglog.service.ContextService;
+import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.client.GlmClient;
+import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -33,18 +38,19 @@ public class MeetingAnalysisService {
               "summary": "전체 회의 요약",
               "unresolvedItems": "미결 사항 (없으면 null)",
               "worklogs": [
-                { "assigneeName": "담당자 이름", "task": "작업 내용", "dueDate": "YYYY-MM-DD 또는 null" }
+                { "assigneeName": "담당자 이름", "task": "작업 내용", "dueDate": "YYYY-MM-DD" }
               ],
               "decisions": [
                 { "content": "결정 내용" }
               ]
             }
+            dueDate는 날짜가 있으면 "YYYY-MM-DD" 문자열로, 없으면 따옴표 없는 null로 반환하세요.
             """;
 
     private final MeetingRepository meetingRepository;
     private final ContextCacheRepository contextCacheRepository;
     private final UtteranceRepository utteranceRepository;
-    private final MeetingSummaryRepository meetingSummaryRepository;
+    private final ContextService contextService;
     private final GlmClient glmClient;
     private final ObjectMapper objectMapper;
 
@@ -52,6 +58,10 @@ public class MeetingAnalysisService {
         // 1. 회의 조회
         Meeting meeting =
                 meetingRepository.findById(meetingId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
+        Project project = meeting.getProject();
+        if (project == null) {
+            throw new ServiceException("400-1", "회의에 연결된 프로젝트가 없습니다.");
+        }
 
         // 2. 컨텍스트 구성
         String context = buildContext(meeting);
@@ -59,21 +69,23 @@ public class MeetingAnalysisService {
         // 3. GLM 호출 및 응답 파싱
         AnalysisResult result = callGlm(context);
 
-        // 4. MeetingSummary 저장
-        MeetingSummary summary = MeetingSummary.builder()
-                .meeting(meeting)
-                .summary(result.summary())
-                .unresolvedItems(result.unresolvedItems())
-                .build();
-        meetingSummaryRepository.save(summary);
+        // 4. 분석 결과를 통합 컨텍스트 저장 경로로 전달
+        contextService.updateContext(project.getId(), toUpdateContextRequest(meeting.getId(), result));
+    }
 
-        // 5. WorkLog 저장 (스켈레톤)
-        // TODO: WorkLogService 구현 후 연동
-        // result.worklogs().forEach(item -> ...);
+    private UpdateContextRequest toUpdateContextRequest(Long meetingId, AnalysisResult result) {
+        List<String> decisions = result.decisions() == null
+                ? null
+                : result.decisions().stream().map(DecisionItem::content).toList();
+        List<ActionItemRequest> actionItems = result.worklogs() == null
+                ? null
+                : result.worklogs().stream().map(this::toActionItemRequest).toList();
 
-        // 6. Decision 저장 (스켈레톤)
-        // TODO: DecisionService 구현 후 연동 (embedding 포함)
-        // result.decisions().forEach(item -> ...);
+        return new UpdateContextRequest(meetingId, result.summary(), result.unresolvedItems(), decisions, actionItems);
+    }
+
+    private ActionItemRequest toActionItemRequest(WorkLogItem item) {
+        return new ActionItemRequest(item.assigneeName(), item.task(), item.dueDate());
     }
 
     private String buildContext(Meeting meeting) {

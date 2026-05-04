@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import org.hibernate.annotations.CreationTimestamp;
 
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.pgvector.PGvector;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -31,6 +32,9 @@ public class MeetingSummary {
 
     @Column(name = "unresolved_items", columnDefinition = "TEXT")
     private String unresolvedItems;
+
+    @Column(name = "embedding", columnDefinition = "vector(1536)", insertable = false, updatable = false)
+    private PGvector embedding;
 
     // boolean confirmed → Lombok이 isConfirmed() 생성
     @Column(name = "is_confirmed", nullable = false)

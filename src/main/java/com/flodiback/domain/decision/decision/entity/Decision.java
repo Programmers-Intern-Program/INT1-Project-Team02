@@ -28,15 +28,14 @@ public class Decision {
     @JoinColumn(name = "project_id", nullable = false)
     private Project project;
 
-    // ON DELETE SET NULL → nullable
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "meeting_id", nullable = true)
+    @JoinColumn(name = "meeting_id")
     private Meeting meeting;
 
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    @Column(name = "embedding", columnDefinition = "vector(768)", insertable = false, updatable = false)
+    @Column(name = "embedding", columnDefinition = "vector(1536)", insertable = false, updatable = false)
     private PGvector embedding;
 
     @CreationTimestamp
@@ -44,11 +43,10 @@ public class Decision {
     private LocalDateTime decidedAt;
 
     @Builder
-    public Decision(Project project, Meeting meeting, String content, PGvector embedding) {
+    public Decision(Project project, Meeting meeting, String content) {
         this.project = project;
         this.meeting = meeting;
         this.content = content;
-        this.embedding = embedding;
     }
 
     public void updateContent(String content) {

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -24,11 +25,13 @@ import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
-import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
-import com.flodiback.domain.meeting.meetinglog.repository.MeetingSummaryRepository;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
+import com.flodiback.domain.meeting.meetinglog.service.ContextService;
+import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.client.GlmClient;
+import com.flodiback.global.exception.ServiceException;
 
 @ExtendWith(MockitoExtension.class)
 class MeetingAnalysisServiceTest {
@@ -46,7 +49,7 @@ class MeetingAnalysisServiceTest {
     private UtteranceRepository utteranceRepository;
 
     @Mock
-    private MeetingSummaryRepository meetingSummaryRepository;
+    private ContextService contextService;
 
     @Mock
     private GlmClient glmClient;
@@ -54,7 +57,7 @@ class MeetingAnalysisServiceTest {
     @Mock(name = "objectMapper")
     private ObjectMapper objectMapper;
 
-    private final ObjectMapper realMapper = new ObjectMapper();
+    private final ObjectMapper realMapper = new ObjectMapper().findAndRegisterModules();
 
     // ── analyze ───────────────────────────────────────────────────────────────
 
@@ -70,9 +73,10 @@ class MeetingAnalysisServiceTest {
     }
 
     @Test
-    void analyze_캐시없고_발화있을때_summary저장() throws Exception {
+    void analyze_캐시없고_발화있을때_updateContext_호출() throws Exception {
         // given
-        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
         Utterance u1 = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("홍길동")
@@ -92,8 +96,13 @@ class MeetingAnalysisServiceTest {
                 {
                   "summary": "API 명세 확정 및 구현 일정 논의",
                   "unresolvedItems": null,
-                  "worklogs": [],
-                  "decisions": []
+                  "worklogs": [
+                    { "assigneeName": "김철수", "task": "구현 완료", "dueDate": "2026-05-04" },
+                    { "assigneeName": "이영희", "task": "테스트 작성", "dueDate": null }
+                  ],
+                  "decisions": [
+                    { "content": "API 명세를 확정한다" }
+                  ]
                 }
                 """;
 
@@ -108,22 +117,24 @@ class MeetingAnalysisServiceTest {
         service.analyze(1L);
 
         // then
-        ArgumentCaptor<MeetingSummary> captor = ArgumentCaptor.forClass(MeetingSummary.class);
-        verify(meetingSummaryRepository).save(captor.capture());
+        ArgumentCaptor<UpdateContextRequest> captor = ArgumentCaptor.forClass(UpdateContextRequest.class);
+        verify(contextService).updateContext(org.mockito.ArgumentMatchers.eq(10L), captor.capture());
 
-        MeetingSummary saved = captor.getValue();
-        System.out.println("=== 저장된 MeetingSummary ===");
-        System.out.println("summary        : " + saved.getSummary());
-        System.out.println("unresolvedItems: " + saved.getUnresolvedItems());
+        UpdateContextRequest saved = captor.getValue();
 
-        assertThat(saved.getSummary()).isEqualTo("API 명세 확정 및 구현 일정 논의");
-        assertThat(saved.getUnresolvedItems()).isNull();
+        assertThat(saved.summary()).isEqualTo("API 명세 확정 및 구현 일정 논의");
+        assertThat(saved.unresolvedItems()).isNull();
+        assertThat(saved.decisions()).containsExactly("API 명세를 확정한다");
+        assertThat(saved.actionItems()).hasSize(2);
+        assertThat(saved.actionItems().get(0).dueDate()).isEqualTo(LocalDate.of(2026, 5, 4));
+        assertThat(saved.actionItems().get(1).dueDate()).isNull();
     }
 
     @Test
     void analyze_캐시있을때_context에_이전요약포함() throws Exception {
         // given
-        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
         ContextCache cache = ContextCache.builder()
                 .meeting(meeting)
                 .version(1)
@@ -171,7 +182,8 @@ class MeetingAnalysisServiceTest {
     @Test
     void analyze_glm응답_마크다운코드블록_제거후_파싱() throws Exception {
         // given
-        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
 
         String glmResponseWithCodeBlock = """
                 ```json
@@ -194,22 +206,20 @@ class MeetingAnalysisServiceTest {
         service.analyze(1L);
 
         // then
-        ArgumentCaptor<MeetingSummary> captor = ArgumentCaptor.forClass(MeetingSummary.class);
-        verify(meetingSummaryRepository).save(captor.capture());
+        ArgumentCaptor<UpdateContextRequest> captor = ArgumentCaptor.forClass(UpdateContextRequest.class);
+        verify(contextService).updateContext(org.mockito.ArgumentMatchers.eq(10L), captor.capture());
 
-        MeetingSummary saved = captor.getValue();
-        System.out.println("=== 저장된 MeetingSummary (마크다운 제거 후) ===");
-        System.out.println("summary        : " + saved.getSummary());
-        System.out.println("unresolvedItems: " + saved.getUnresolvedItems());
+        UpdateContextRequest saved = captor.getValue();
 
-        assertThat(saved.getSummary()).isEqualTo("마크다운 포함 응답");
-        assertThat(saved.getUnresolvedItems()).isEqualTo("미결 사항 있음");
+        assertThat(saved.summary()).isEqualTo("마크다운 포함 응답");
+        assertThat(saved.unresolvedItems()).isEqualTo("미결 사항 있음");
     }
 
     @Test
     void analyze_glm응답_파싱실패시_예외발생() throws Exception {
         // given
-        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("테스트 회의").build();
 
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
@@ -222,5 +232,21 @@ class MeetingAnalysisServiceTest {
         assertThatThrownBy(() -> service.analyze(1L))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("GLM 응답 파싱 실패");
+    }
+
+    @Test
+    void analyze_프로젝트없는_회의면_ServiceException() {
+        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+
+        assertThatThrownBy(() -> service.analyze(1L))
+                .isInstanceOf(ServiceException.class)
+                .hasMessageContaining("회의에 연결된 프로젝트가 없습니다.");
+    }
+
+    private Project mockProject(Long id) {
+        Project project = org.mockito.Mockito.mock(Project.class);
+        org.mockito.Mockito.lenient().when(project.getId()).thenReturn(id);
+        return project;
     }
 }

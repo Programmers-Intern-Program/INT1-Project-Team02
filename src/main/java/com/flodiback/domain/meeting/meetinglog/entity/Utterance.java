@@ -2,6 +2,8 @@ package com.flodiback.domain.meeting.meetinglog.entity;
 
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.CreationTimestamp;
+
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 
 import jakarta.persistence.*;
@@ -45,6 +47,10 @@ public class Utterance {
     @Column(name = "token_count")
     private Integer tokenCount;
 
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
     @Builder
     public Utterance(
             Meeting meeting,
@@ -54,7 +60,8 @@ public class Utterance {
             String content,
             LocalDateTime spokenAt,
             Long sequenceNo,
-            Integer tokenCount) {
+            Integer tokenCount,
+            LocalDateTime createdAt) {
         this.meeting = meeting;
         this.speakerName = speakerName;
         this.speakerDiscordId = speakerDiscordId;
@@ -63,5 +70,6 @@ public class Utterance {
         this.spokenAt = spokenAt != null ? spokenAt : LocalDateTime.now();
         this.sequenceNo = sequenceNo;
         this.tokenCount = tokenCount;
+        this.createdAt = createdAt;
     }
 }
