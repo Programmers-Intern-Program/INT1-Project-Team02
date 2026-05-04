@@ -16,7 +16,7 @@ class OpenAiPcmConverterTest {
 
         byte[] output = converter.toRealtimePcm16(input);
 
-        assertThat(output).containsExactly(littleEndianShorts((short) 2500, (short) 1000));
+        assertThat(output).containsExactly(littleEndianShorts((short) 2047, (short) 1609));
     }
 
     @Test
