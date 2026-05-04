@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: madupal
+reviewed-at: 2026-05-04
+evidence: PR 27
 ---
 
 # Redis Streams Rolling Summary
