@@ -17,6 +17,7 @@ export INTERNAL_API_BASE_URL=http://localhost:8080
 export OPENAI_API_KEY=...
 export OPENAI_REALTIME_WS_URL='wss://api.openai.com/v1/realtime?intent=transcription'
 export OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+export OPENAI_TRANSCRIBE_LANGUAGE=ko
 ```
 
 Docker에서 봇을 실행하고 Spring 서버를 호스트 Mac에서 실행한다면 `INTERNAL_API_BASE_URL`은

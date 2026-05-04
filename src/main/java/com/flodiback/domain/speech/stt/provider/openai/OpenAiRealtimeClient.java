@@ -28,8 +28,10 @@ final class OpenAiRealtimeClient {
     private static final String ENV_OPENAI_API_KEY = "OPENAI_API_KEY";
     private static final String ENV_OPENAI_REALTIME_WS_URL = "OPENAI_REALTIME_WS_URL";
     private static final String ENV_OPENAI_TRANSCRIBE_MODEL = "OPENAI_TRANSCRIBE_MODEL";
+    private static final String ENV_OPENAI_TRANSCRIBE_LANGUAGE = "OPENAI_TRANSCRIBE_LANGUAGE";
 
-    private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
+    private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe";
+    private static final String DEFAULT_TRANSCRIBE_LANGUAGE = "ko";
     private static final Duration COMMIT_WAIT_TIMEOUT = Duration.ofSeconds(8);
 
     private final HttpClient httpClient =
@@ -65,14 +67,14 @@ final class OpenAiRealtimeClient {
 
         ObjectNode inputNode = sessionNode.putObject("audio").putObject("input");
         inputNode.putObject("format").put("type", "audio/pcm").put("rate", 24000);
-        inputNode
-                .putObject("transcription")
-                .put("model", envOrDefault(ENV_OPENAI_TRANSCRIBE_MODEL, DEFAULT_TRANSCRIBE_MODEL));
+        ObjectNode transcriptionNode = inputNode.putObject("transcription");
+        transcriptionNode.put("model", envOrDefault(ENV_OPENAI_TRANSCRIBE_MODEL, DEFAULT_TRANSCRIBE_MODEL));
+        transcriptionNode.put("language", envOrDefault(ENV_OPENAI_TRANSCRIBE_LANGUAGE, DEFAULT_TRANSCRIBE_LANGUAGE));
         inputNode.putNull("turn_detection");
 
         sendJson(webSocket, root);
 
-        log.info("OpenAI STT session opened. sessionId={}, speakerId={}", session.sessionId(), session.speakerId());
+        log.info("[OPENAI/세션열림] sessionId={}, speakerId={}", session.sessionId(), session.speakerId());
     }
 
     /**
@@ -87,8 +89,7 @@ final class OpenAiRealtimeClient {
 
         sendJson(webSocket, event);
 
-        log.debug(
-                "OpenAI append sent. sessionId={}, bytes={}, ts={}", session.sessionId(), pcm16le.length, timestampMs);
+        log.debug("[OPENAI/오디오전송] sessionId={}, bytes={}, ts={}", session.sessionId(), pcm16le.length, timestampMs);
     }
 
     /**
@@ -101,14 +102,14 @@ final class OpenAiRealtimeClient {
         commit.put("type", "input_audio_buffer.commit");
         sendJson(webSocket, commit);
 
-        log.info("OpenAI commit sent. sessionId={}, sentBytes={}", session.sessionId(), session.sentPcmBytes());
+        log.info("[OPENAI/커밋전송] sessionId={}, sentBytes={}", session.sessionId(), session.sentPcmBytes());
 
         // completed 이벤트를 기다렸다가 닫는다.
         // 네트워크 상태에 따라 못 받을 수도 있으므로 timeout을 둔다.
         try {
             session.completedFuture().get(COMMIT_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         } catch (Exception timeoutOrError) {
-            log.warn("OpenAI completed wait timeout/error. sessionId={}", session.sessionId(), timeoutOrError);
+            log.warn("[OPENAI/커밋대기실패] sessionId={}", session.sessionId(), timeoutOrError);
         }
 
         webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
