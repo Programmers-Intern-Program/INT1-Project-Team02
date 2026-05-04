@@ -10,6 +10,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
@@ -34,6 +36,7 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
  */
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
+    private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
     private static final long CAPTION_DEBOUNCE_MS = 300L;
     private static final int CAPTION_MIN_CHARS = 2;
     private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
@@ -166,6 +169,13 @@ public class BotSttListener implements SttListener {
                                 speakerDiscordId,
                                 meetingId,
                                 text.length());
+                        log.info(
+                                "[전송/응답바디] sessionId={}, speakerId={}, meetingId={}, body={}",
+                                result.sessionId(),
+                                speakerDiscordId,
+                                meetingId,
+                                response.body());
+                        logAiAnswerStatus(result.sessionId(), text, response.body());
                     });
         } catch (Exception exception) {
             log.warn(
@@ -336,6 +346,44 @@ public class BotSttListener implements SttListener {
                                     throwable));
         }
         clearLiveCaptionState();
+    }
+
+    private void logAiAnswerStatus(String sessionId, String finalText, String responseBody) {
+        boolean wakeWordDetected = containsWakeWord(finalText);
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode aiAnswerNode = root.path("data").path("ai_answer");
+            boolean hasAiAnswer = !aiAnswerNode.isMissingNode() && !aiAnswerNode.isNull() && !aiAnswerNode.asText().isBlank();
+            int aiAnswerLength = hasAiAnswer ? aiAnswerNode.asText().length() : 0;
+            log.info(
+                    "[AI/응답체크] sessionId={}, speakerId={}, meetingId={}, wakeWordDetected={}, hasAiAnswer={}, aiAnswerLength={}",
+                    sessionId,
+                    speakerDiscordId,
+                    meetingId,
+                    wakeWordDetected,
+                    hasAiAnswer,
+                    aiAnswerLength);
+        } catch (Exception parseException) {
+            log.warn(
+                    "[AI/응답체크실패] sessionId={}, speakerId={}, meetingId={}, wakeWordDetected={}",
+                    sessionId,
+                    speakerDiscordId,
+                    meetingId,
+                    wakeWordDetected,
+                    parseException);
+        }
+    }
+
+    private boolean containsWakeWord(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        for (String wakeWord : WAKE_WORDS) {
+            if (text.contains(wakeWord)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static final class CaptionDebounceThreadFactory implements ThreadFactory {
