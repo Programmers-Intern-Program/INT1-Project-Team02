@@ -93,9 +93,20 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final List<Integer> calibrationNoiseRms = new ArrayList<>();
     private final List<Integer> calibrationSpeechRms = new ArrayList<>();
 
+    /**
+     * 하위 호환 생성자.
+     *
+     * @deprecated Guild 기반 화자명 조회를 쓰려면
+     *     {@link #PerUserAudioReceiveHandler(long, Guild, SttProvider, long)} 생성자를 사용하세요.
+     */
+    @Deprecated(forRemoval = false)
+    public PerUserAudioReceiveHandler(long guildId, SttProvider sttProvider, long meetingId) {
+        this(guildId, null, sttProvider, meetingId);
+    }
+
     public PerUserAudioReceiveHandler(long guildId, Guild guild, SttProvider sttProvider, long meetingId) {
         this.guildId = guildId;
-        this.guild = Objects.requireNonNull(guild);
+        this.guild = guild;
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
         this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
@@ -436,15 +447,17 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     }
 
     private String resolveSpeakerName(long userId, String fallbackSpeakerName) {
-        Member member = guild.getMemberById(userId);
-        if (member != null) {
-            String effectiveName = member.getEffectiveName();
-            if (effectiveName != null && !effectiveName.isBlank()) {
-                return effectiveName;
-            }
-            String userName = member.getUser().getName();
-            if (userName != null && !userName.isBlank()) {
-                return userName;
+        if (guild != null) {
+            Member member = guild.getMemberById(userId);
+            if (member != null) {
+                String effectiveName = member.getEffectiveName();
+                if (effectiveName != null && !effectiveName.isBlank()) {
+                    return effectiveName;
+                }
+                String userName = member.getUser().getName();
+                if (userName != null && !userName.isBlank()) {
+                    return userName;
+                }
             }
         }
 
