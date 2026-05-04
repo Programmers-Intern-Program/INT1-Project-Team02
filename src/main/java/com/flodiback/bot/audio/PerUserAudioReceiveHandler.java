@@ -1,9 +1,18 @@
 package com.flodiback.bot.audio;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -13,10 +22,14 @@ import org.slf4j.LoggerFactory;
 
 import com.flodiback.bot.stt.BotSttListener;
 import com.flodiback.domain.speech.stt.SttProvider;
+import com.orctom.vad4j.VAD;
 
 import net.dv8tion.jda.api.audio.AudioReceiveHandler;
 import net.dv8tion.jda.api.audio.OpusPacket;
 import net.dv8tion.jda.api.audio.UserAudio;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 
 /**
  * 길드 단위 음성 수신 핸들러.
@@ -32,14 +45,27 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     // 로그 과다 방지를 위한 주기
     private static final long LOG_INTERVAL_PACKETS = 50;
     // 이 시간(ms) 동안 화자 오디오가 없으면 해당 STT 세션을 종료한다.
-    private static final long STT_SILENCE_END_MS = 1500L;
+    private static final long STT_SILENCE_END_MS = 1800L;
+    // 무음 종료 감시 주기(ms)
+    private static final long STT_SILENCE_WATCH_INTERVAL_MS = 250L;
+    private static final int VAD_START_RMS_THRESHOLD = 600;
+    private static final int VAD_END_RMS_THRESHOLD = 500;
+    private static final float VAD_START_PROB_THRESHOLD = 0.62f;
+    private static final float VAD_END_PROB_THRESHOLD = 0.45f;
+    private static final int VAD_MIN_CONSECUTIVE_SPEECH_FRAMES = 3;
+    private static final int VAD_PREROLL_MS = 400;
+    private static final long VAD_CALIBRATION_WINDOW_MS = 180_000L;
 
     private final long guildId;
     private final long meetingId;
     private final SttProvider sttProvider;
+    private final ScheduledExecutorService silenceWatcher;
+    private final Guild guild;
+    private volatile MessageChannel captionChannel;
 
     // 사용자 ID별 누적 통계
     private final Map<Long, SpeakerStats> statsByUserId = new ConcurrentHashMap<>();
+    private final Map<Long, VAD> webRtcVadByUserId = new ConcurrentHashMap<>();
     // 사용자 ID별 활성 STT 세션
     private final Map<Long, ActiveSttSession> activeSttSessionsByUserId = new ConcurrentHashMap<>();
 
@@ -59,11 +85,40 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     // 첫 수신 순간 강조 로그 플래그
     private final AtomicBoolean firstEncodedLogged = new AtomicBoolean(false);
     private final AtomicBoolean firstUserLogged = new AtomicBoolean(false);
+    private final AtomicBoolean webRtcVadUnavailableLogged = new AtomicBoolean(false);
+    private final AtomicLong vadStartThreshold = new AtomicLong(VAD_START_RMS_THRESHOLD);
+    private final AtomicLong vadEndThreshold = new AtomicLong(VAD_END_RMS_THRESHOLD);
+    private final AtomicLong calibrationStartedAtMs = new AtomicLong(System.currentTimeMillis());
+    private final AtomicBoolean calibrationDone = new AtomicBoolean(false);
+    private final List<Integer> calibrationNoiseRms = new ArrayList<>();
+    private final List<Integer> calibrationSpeechRms = new ArrayList<>();
 
+    /**
+     * 하위 호환 생성자.
+     *
+     * @deprecated Guild 기반 화자명 조회를 쓰려면
+     *     {@link #PerUserAudioReceiveHandler(long, Guild, SttProvider, long)} 생성자를 사용하세요.
+     */
+    @Deprecated(forRemoval = false)
     public PerUserAudioReceiveHandler(long guildId, SttProvider sttProvider, long meetingId) {
+        this(guildId, null, sttProvider, meetingId);
+    }
+
+    public PerUserAudioReceiveHandler(long guildId, Guild guild, SttProvider sttProvider, long meetingId) {
         this.guildId = guildId;
+        this.guild = guild;
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
+        this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
+        this.silenceWatcher.scheduleAtFixedRate(
+                this::endInactiveSttSessionsOnSchedule,
+                STT_SILENCE_WATCH_INTERVAL_MS,
+                STT_SILENCE_WATCH_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+    }
+
+    public void updateCaptionChannel(MessageChannel captionChannel) {
+        this.captionChannel = captionChannel;
     }
 
     @Override
@@ -124,8 +179,26 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 stats.decodedPcmPacketCount.incrementAndGet();
                 stats.decodedPcmByteCount.addAndGet(decodedPcm.length);
 
-                // 디코딩 성공 시점에만 STT로 실제 PCM을 전달한다.
-                forwardPcmToStt(userId, stats.userName, decodedPcm, now);
+                int rms = calculateRms(decodedPcm);
+                maybeCalibrateVad(now, rms);
+                SpeechEvidence speechEvidence = detectSpeechEvidence(userId, decodedPcm, rms);
+
+                ForwardDecision decision = evaluateVad(userId, stats, decodedPcm, speechEvidence, now);
+                if (decision == ForwardDecision.DROP) {
+                    // no-op
+                } else if (decision == ForwardDecision.START_WITH_PREROLL) {
+                    ActiveSttSession session = getOrCreateSttSession(userId, stats.userName, now);
+                    if (session == null) {
+                        // no-op
+                    } else {
+                        session.lastAudioAtMs.set(now);
+                        for (byte[] preRollFrame : stats.preRollBuffer.drain()) {
+                            sendToActiveSession(session, userId, preRollFrame, now);
+                        }
+                    }
+                } else {
+                    forwardPcmToStt(userId, stats.userName, decodedPcm, now);
+                }
             } catch (Exception decodeException) {
                 nonDecodableEncodedPackets.incrementAndGet();
                 firstDecodeFailureReason.compareAndSet(null, decodeException.getMessage());
@@ -133,33 +206,30 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 // 실시간 수신 루프에서 매 프레임 warn을 찍으면 로그가 폭증하므로 샘플링한다.
                 if (failures <= 3 || failures % 200 == 0) {
                     log.warn(
-                            "Failed to decode opus packet. guildId={}, userId={}, decodeFailures={}",
+                            "[음성/디코드실패] guildId={}, userId={}, decodeFailures={}, firstReason={}",
                             guildId,
                             userId,
                             failures,
+                            firstDecodeFailureReason.get() == null ? "-" : firstDecodeFailureReason.get(),
                             decodeException);
                 }
             }
         }
 
-        // 현재 화자 외 세션 중 무음 초과 세션을 정리한다.
-        endInactiveSttSessions(now, userId);
-
         if (firstEncodedLogged.compareAndSet(false, true)) {
-            log.info(
-                    "[FIRST_ENCODED_AUDIO] guildId={}, firstUserId={}, encodedPackets={}",
-                    guildId,
-                    userId,
-                    encodedCount);
+            log.info("[음성/인코드첫수신] guildId={}, firstUserId={}, encodedPackets={}", guildId, userId, encodedCount);
         }
         if (encodedCount == 1 || encodedCount % LOG_INTERVAL_PACKETS == 0) {
             log.info(
-                    "Encoded audio received. guildId={}, encodedPackets={}, userId={}, userEncodedPackets={}, canDecode={}",
+                    "[음성/인코드수신] guildId={}, encodedPackets={}, userId={}, userEncodedPackets={}, canDecode={}, decodeFailures={}, userPackets={}, activeSttSessions={}",
                     guildId,
                     encodedCount,
                     userId,
                     userEncodedPackets,
-                    canDecode);
+                    canDecode,
+                    decodeFailureCount.get(),
+                    userPacketCount.get(),
+                    activeSttSessionsByUserId.size());
         }
     }
 
@@ -178,7 +248,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         if (firstUserLogged.compareAndSet(false, true)) {
             log.info(
-                    "[FIRST_USER_AUDIO] guildId={}, userId={}, userName={}, frameBytes={}",
+                    "[음성/유저PCM첫수신] guildId={}, userId={}, userName={}, frameBytes={}",
                     guildId,
                     userId,
                     userName,
@@ -195,13 +265,15 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         if (packetCount == 1 || packetCount % LOG_INTERVAL_PACKETS == 0) {
             log.info(
-                    "Audio receive stats. guildId={}, userId={}, userName={}, userPackets={}, bytes={}, totalUserPackets={}",
+                    "[음성/유저PCM수신] guildId={}, userId={}, userName={}, userPackets={}, bytes={}, totalUserPackets={}, encodedPackets={}, decodeFailures={}",
                     guildId,
                     userId,
                     userName,
                     packetCount,
                     stats.byteCount.get(),
-                    totalUserPackets);
+                    totalUserPackets,
+                    encodedPacketCount.get(),
+                    decodeFailureCount.get());
         }
     }
 
@@ -209,6 +281,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * 길드 음성 세션을 명시적으로 종료할 때(예: !leave) 모든 STT 세션을 end(commit)한다.
      */
     public void closeAllSttSessions() {
+        silenceWatcher.shutdownNow();
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
             ActiveSttSession activeSession = entry.getValue();
@@ -216,6 +289,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 safelyEndSession(activeSession, "manual_close_all");
             }
         }
+        for (VAD vad : webRtcVadByUserId.values()) {
+            closeVadQuietly(vad);
+        }
+        webRtcVadByUserId.clear();
     }
 
     /**
@@ -245,6 +322,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     + decodedPcmBytes
                     + ", activeSttSessions="
                     + activeSttSessionsByUserId.size()
+                    + ", vadStartThreshold="
+                    + vadStartThreshold.get()
+                    + ", vadEndThreshold="
+                    + vadEndThreshold.get()
                     + ", firstDecodeFailureReason="
                     + (decodeFailureReason == null ? "-" : decodeFailureReason)
                     + ")";
@@ -288,7 +369,9 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                             .append(", userPackets=")
                             .append(stats.packetCount.get())
                             .append(", userBytes=")
-                            .append(stats.byteCount.get());
+                            .append(stats.byteCount.get())
+                            .append(", vadState=")
+                            .append(stats.vadState);
                 });
         return builder.toString();
     }
@@ -308,10 +391,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         session.lastAudioAtMs.set(now);
 
         try {
-            sttProvider.sendPcm(session.sessionId, decodedPcm, now);
+            sendToActiveSession(session, userId, decodedPcm, now);
         } catch (Exception sendException) {
             log.warn(
-                    "Failed to send PCM to STT. guildId={}, sessionId={}, userId={}",
+                    "[STT/PCM전달실패] guildId={}, sessionId={}, userId={}",
                     guildId,
                     session.sessionId,
                     userId,
@@ -329,7 +412,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
 
         String speakerId = Long.toString(userId);
-        String normalizedSpeakerName = (speakerName == null || speakerName.isBlank()) ? "user-" + userId : speakerName;
+        String normalizedSpeakerName = resolveSpeakerName(userId, speakerName);
         String sessionId = guildId + ":" + speakerId + ":" + now;
 
         ActiveSttSession created = new ActiveSttSession(sessionId, speakerId, now);
@@ -340,10 +423,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         try {
             // 세션 시작 시점에 결과 소비자(BotSttListener)를 함께 바인딩한다.
-            BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName);
+            BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName, captionChannel);
             sttProvider.startSession(sessionId, speakerId, listener);
             log.info(
-                    "STT session started. guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
+                    "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
                     guildId,
                     meetingId,
                     userId,
@@ -353,7 +436,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         } catch (Exception startException) {
             activeSttSessionsByUserId.remove(userId, created);
             log.warn(
-                    "Failed to start STT session. guildId={}, meetingId={}, userId={}, sessionId={}",
+                    "[STT/세션시작실패] guildId={}, meetingId={}, userId={}, sessionId={}",
                     guildId,
                     meetingId,
                     userId,
@@ -363,21 +446,41 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
     }
 
+    private String resolveSpeakerName(long userId, String fallbackSpeakerName) {
+        if (guild != null) {
+            Member member = guild.getMemberById(userId);
+            if (member != null) {
+                String effectiveName = member.getEffectiveName();
+                if (effectiveName != null && !effectiveName.isBlank()) {
+                    return effectiveName;
+                }
+                String userName = member.getUser().getName();
+                if (userName != null && !userName.isBlank()) {
+                    return userName;
+                }
+            }
+        }
+
+        if (fallbackSpeakerName != null && !fallbackSpeakerName.isBlank()) {
+            return fallbackSpeakerName;
+        }
+        return "user-" + userId;
+    }
+
+    private void sendToActiveSession(ActiveSttSession session, long userId, byte[] pcm, long now) {
+        session.lastAudioAtMs.set(now);
+        sttProvider.sendPcm(session.sessionId, pcm, now);
+    }
+
     /**
      * 무음 세션을 종료한다.
      *
-     * @param now 현재 시각(ms)
-     * @param speakingUserId 지금 오디오가 들어온 사용자 ID(해당 사용자는 종료 제외)
-     * @implNote 현재 구현은 "오디오 패킷이 들어올 때" 무음 체크를 수행한다.
-     *     따라서 완전 무음 상태에서는 다음 패킷 또는 !leave 시점에 종료가 반영된다.
+     * @implNote 스케줄러가 주기적으로 검사하므로, 다른 사용자의 패킷 도착 여부와 무관하게 종료된다.
      */
-    private void endInactiveSttSessions(long now, long speakingUserId) {
+    private void endInactiveSttSessionsOnSchedule() {
+        long now = System.currentTimeMillis();
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
-            if (userId == speakingUserId) {
-                continue;
-            }
-
             ActiveSttSession session = entry.getValue();
             long silenceMs = now - session.lastAudioAtMs.get();
             if (silenceMs < STT_SILENCE_END_MS) {
@@ -397,7 +500,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         try {
             sttProvider.endSession(session.sessionId);
             log.info(
-                    "STT session ended. guildId={}, meetingId={}, sessionId={}, speakerId={}, reason={}",
+                    "[STT/세션종료] guildId={}, meetingId={}, sessionId={}, speakerId={}, reason={}",
                     guildId,
                     meetingId,
                     session.sessionId,
@@ -405,7 +508,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     reason);
         } catch (Exception endException) {
             log.warn(
-                    "Failed to end STT session. guildId={}, meetingId={}, sessionId={}, reason={}",
+                    "[STT/세션종료실패] guildId={}, meetingId={}, sessionId={}, reason={}",
                     guildId,
                     meetingId,
                     session.sessionId,
@@ -430,11 +533,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 firstDecodeFailureReason.compareAndSet(null, "decodedShort is null/empty");
                 long failures = decodeFailureCount.incrementAndGet();
                 if (failures <= 3 || failures % 200 == 0) {
-                    log.warn(
-                            "Decoded short PCM is empty. guildId={}, userId={}, decodeFailures={}",
-                            guildId,
-                            userId,
-                            failures);
+                    log.warn("[음성/빈PCM] guildId={}, userId={}, decodeFailures={}", guildId, userId, failures);
                 }
                 return null;
             }
@@ -444,6 +543,218 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             // 상위에서 카운트/로그 처리하도록 그대로 전달
             throw exception;
         }
+    }
+
+    private ForwardDecision evaluateVad(
+            long userId, SpeakerStats stats, byte[] decodedPcm, SpeechEvidence speechEvidence, long now) {
+        stats.preRollBuffer.add(decodedPcm);
+        ActiveSttSession activeSession = activeSttSessionsByUserId.get(userId);
+        long startThreshold = vadStartThreshold.get();
+        long endThreshold = vadEndThreshold.get();
+        boolean startSpeech = speechEvidence.webRtcAvailable
+                ? speechEvidence.webRtcScore >= VAD_START_PROB_THRESHOLD
+                : speechEvidence.rms >= startThreshold;
+        boolean continueSpeech = speechEvidence.webRtcAvailable
+                ? speechEvidence.webRtcScore >= VAD_END_PROB_THRESHOLD
+                : speechEvidence.rms >= endThreshold;
+
+        if (activeSession != null) {
+            if (continueSpeech) {
+                stats.vadState = VadState.IN_SPEECH;
+                stats.trailingSilenceStartedAtMs.set(0L);
+                return ForwardDecision.FORWARD;
+            }
+            if (stats.trailingSilenceStartedAtMs.get() == 0L) {
+                stats.trailingSilenceStartedAtMs.set(now);
+            }
+            stats.vadState = VadState.TRAILING_SILENCE;
+            return ForwardDecision.DROP;
+        }
+
+        if (startSpeech) {
+            long consecutive = stats.consecutiveSpeechFrames.incrementAndGet();
+            stats.vadState = VadState.SPEECH_CANDIDATE;
+            if (consecutive >= VAD_MIN_CONSECUTIVE_SPEECH_FRAMES) {
+                stats.consecutiveSpeechFrames.set(0L);
+                stats.trailingSilenceStartedAtMs.set(0L);
+                stats.vadState = VadState.IN_SPEECH;
+                return ForwardDecision.START_WITH_PREROLL;
+            }
+            return ForwardDecision.DROP;
+        }
+
+        if (continueSpeech && stats.vadState == VadState.SPEECH_CANDIDATE) {
+            return ForwardDecision.DROP;
+        }
+
+        stats.consecutiveSpeechFrames.set(0L);
+        stats.trailingSilenceStartedAtMs.set(0L);
+        stats.vadState = VadState.IDLE;
+        return ForwardDecision.DROP;
+    }
+
+    private int calculateRms(byte[] decodedPcm) {
+        if (decodedPcm == null || decodedPcm.length < 2) {
+            return 0;
+        }
+
+        long sumSquare = 0L;
+        int sampleCount = 0;
+        // JDA 출력은 16-bit signed big-endian PCM
+        for (int index = 0; index + 1 < decodedPcm.length; index += 2) {
+            int high = decodedPcm[index] & 0xFF;
+            int low = decodedPcm[index + 1] & 0xFF;
+            short sample = (short) ((high << 8) | low);
+            int value = sample;
+            sumSquare += (long) value * value;
+            sampleCount++;
+        }
+
+        if (sampleCount == 0) {
+            return 0;
+        }
+        return (int) Math.sqrt(sumSquare / (double) sampleCount);
+    }
+
+    private SpeechEvidence detectSpeechEvidence(long userId, byte[] decodedPcm, int rms) {
+        VAD vad = getOrCreateWebRtcVad(userId);
+        if (vad == null) {
+            return SpeechEvidence.rmsOnly(rms);
+        }
+
+        byte[] mono48kLe = toMono48kLe(decodedPcm);
+        try {
+            float score = vad.speechProbability(mono48kLe);
+            return SpeechEvidence.webRtc(score, rms);
+        } catch (Exception exception) {
+            if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
+                log.warn("[VAD/WEBRTC폴백] guildId={}, reason={}", guildId, exception.toString());
+            }
+            webRtcVadByUserId.remove(userId, vad);
+            closeVadQuietly(vad);
+            return SpeechEvidence.rmsOnly(rms);
+        }
+    }
+
+    private VAD getOrCreateWebRtcVad(long userId) {
+        VAD existing = webRtcVadByUserId.get(userId);
+        if (existing != null) {
+            return existing;
+        }
+
+        try {
+            VAD created = new VAD();
+            VAD previous = webRtcVadByUserId.putIfAbsent(userId, created);
+            if (previous != null) {
+                closeVadQuietly(created);
+                return previous;
+            }
+            return created;
+        } catch (Throwable throwable) {
+            if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
+                log.warn("[VAD/WEBRTC사용불가] guildId={}, fallback=RMS, reason={}", guildId, throwable.toString());
+            }
+            return null;
+        }
+    }
+
+    private void closeVadQuietly(VAD vad) {
+        try {
+            vad.close();
+        } catch (Exception ignored) {
+            // no-op
+        }
+    }
+
+    private byte[] toMono48kLe(byte[] stereoBe) {
+        if (stereoBe == null || stereoBe.length < 4) {
+            return new byte[0];
+        }
+
+        int stereoFrameSize = 4;
+        int frameCount = stereoBe.length / stereoFrameSize;
+        byte[] monoLe = new byte[frameCount * 2];
+        int out = 0;
+        for (int frame = 0; frame < frameCount; frame++) {
+            int index = frame * stereoFrameSize;
+            short left = (short) (((stereoBe[index] & 0xFF) << 8) | (stereoBe[index + 1] & 0xFF));
+            short right = (short) (((stereoBe[index + 2] & 0xFF) << 8) | (stereoBe[index + 3] & 0xFF));
+            short mono = (short) ((left + right) / 2);
+            monoLe[out++] = (byte) (mono & 0xFF);
+            monoLe[out++] = (byte) ((mono >>> 8) & 0xFF);
+        }
+        return monoLe;
+    }
+
+    private void maybeCalibrateVad(long now, int rms) {
+        if (calibrationDone.get()) {
+            return;
+        }
+
+        long startedAt = calibrationStartedAtMs.get();
+        if (now - startedAt <= VAD_CALIBRATION_WINDOW_MS) {
+            synchronized (calibrationNoiseRms) {
+                if (rms >= vadStartThreshold.get()) {
+                    calibrationSpeechRms.add(rms);
+                } else {
+                    calibrationNoiseRms.add(rms);
+                }
+            }
+            return;
+        }
+
+        if (!calibrationDone.compareAndSet(false, true)) {
+            return;
+        }
+
+        int[] noise;
+        int[] speech;
+        synchronized (calibrationNoiseRms) {
+            noise = calibrationNoiseRms.stream().mapToInt(Integer::intValue).toArray();
+            speech = calibrationSpeechRms.stream().mapToInt(Integer::intValue).toArray();
+        }
+
+        if (noise.length == 0) {
+            log.info(
+                    "[VAD/캘리브레이션] guildId={}, noise 샘플 부족으로 기본 임계값 유지(start={}, end={})",
+                    guildId,
+                    vadStartThreshold.get(),
+                    vadEndThreshold.get());
+            return;
+        }
+
+        Arrays.sort(noise);
+        Arrays.sort(speech);
+        int noiseP95 = percentile(noise, 95);
+        int speechP50 = speech.length == 0 ? 0 : percentile(speech, 50);
+        int speechP95 = speech.length == 0 ? 0 : percentile(speech, 95);
+
+        long suggestedStart = Math.max(VAD_START_RMS_THRESHOLD, Math.round(noiseP95 * 1.8));
+        long suggestedEnd = Math.max(VAD_END_RMS_THRESHOLD, Math.round(noiseP95 * 1.2));
+        if (suggestedEnd >= suggestedStart) {
+            suggestedEnd = Math.max(VAD_END_RMS_THRESHOLD, suggestedStart - 100);
+        }
+
+        vadStartThreshold.set(suggestedStart);
+        vadEndThreshold.set(suggestedEnd);
+
+        log.info(
+                "[VAD/캘리브레이션완료] guildId={}, noiseP95={}, speechP50={}, speechP95={}, appliedStart={}, appliedEnd={}",
+                guildId,
+                noiseP95,
+                speechP50,
+                speechP95,
+                suggestedStart,
+                suggestedEnd);
+    }
+
+    private int percentile(int[] sortedValues, int percentile) {
+        if (sortedValues.length == 0) {
+            return 0;
+        }
+        int index = (int) Math.ceil((percentile / 100.0) * sortedValues.length) - 1;
+        index = Math.max(0, Math.min(index, sortedValues.length - 1));
+        return sortedValues[index];
     }
 
     /**
@@ -461,6 +772,21 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
     }
 
+    private static final class SilenceWatcherThreadFactory implements ThreadFactory {
+        private final long guildId;
+
+        private SilenceWatcherThreadFactory(long guildId) {
+            this.guildId = guildId;
+        }
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "stt-silence-watcher-guild-" + guildId);
+            thread.setDaemon(true);
+            return thread;
+        }
+    }
+
     /**
      * 화자별 누적 수신 통계.
      */
@@ -470,9 +796,13 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         private final AtomicLong encodedByteCount = new AtomicLong();
         private final AtomicLong decodedPcmPacketCount = new AtomicLong();
         private final AtomicLong decodedPcmByteCount = new AtomicLong();
+        private final AtomicLong consecutiveSpeechFrames = new AtomicLong();
+        private final AtomicLong trailingSilenceStartedAtMs = new AtomicLong();
         private final AtomicLong packetCount = new AtomicLong();
         private final AtomicLong byteCount = new AtomicLong();
         private final AtomicLong lastSeenAtMs = new AtomicLong();
+        private final PreRollBuffer preRollBuffer = new PreRollBuffer(VAD_PREROLL_MS);
+        private volatile VadState vadState = VadState.IDLE;
 
         private SpeakerStats(String userName) {
             this.userName = userName;
@@ -485,6 +815,71 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             if (this.userName != null && this.userName.startsWith("user-")) {
                 this.userName = candidateName;
             }
+        }
+    }
+
+    private enum VadState {
+        IDLE,
+        SPEECH_CANDIDATE,
+        IN_SPEECH,
+        TRAILING_SILENCE
+    }
+
+    private enum ForwardDecision {
+        DROP,
+        FORWARD,
+        START_WITH_PREROLL
+    }
+
+    private static final class SpeechEvidence {
+        private final boolean webRtcAvailable;
+        private final float webRtcScore;
+        private final int rms;
+
+        private SpeechEvidence(boolean webRtcAvailable, float webRtcScore, int rms) {
+            this.webRtcAvailable = webRtcAvailable;
+            this.webRtcScore = webRtcScore;
+            this.rms = rms;
+        }
+
+        private static SpeechEvidence webRtc(float webRtcScore, int rms) {
+            return new SpeechEvidence(true, webRtcScore, rms);
+        }
+
+        private static SpeechEvidence rmsOnly(int rms) {
+            return new SpeechEvidence(false, 0f, rms);
+        }
+    }
+
+    private static final class PreRollBuffer {
+        private static final int SAMPLE_RATE = 48_000;
+        private static final int CHANNELS = 2;
+        private static final int BYTES_PER_SAMPLE = 2;
+
+        private final int maxBytes;
+        private final Deque<byte[]> frames = new ArrayDeque<>();
+        private int totalBytes = 0;
+
+        private PreRollBuffer(int preRollMs) {
+            this.maxBytes = (int) ((long) SAMPLE_RATE * CHANNELS * BYTES_PER_SAMPLE * preRollMs / 1000L);
+        }
+
+        private void add(byte[] frame) {
+            byte[] copy = Arrays.copyOf(frame, frame.length);
+            frames.addLast(copy);
+            totalBytes += copy.length;
+
+            while (totalBytes > maxBytes && !frames.isEmpty()) {
+                byte[] removed = frames.removeFirst();
+                totalBytes -= removed.length;
+            }
+        }
+
+        private List<byte[]> drain() {
+            List<byte[]> drained = new ArrayList<>(frames);
+            frames.clear();
+            totalBytes = 0;
+            return drained;
         }
     }
 }

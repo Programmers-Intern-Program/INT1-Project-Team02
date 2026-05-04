@@ -20,20 +20,27 @@ public class OpenAiSttProvider implements SttProvider {
     private final OpenAiRealtimeClient realtimeClient;
     private final OpenAiPcmConverter pcmConverter;
     private final OpenAiRealtimeEventHandler eventHandler;
+    private final OpenAiPcmDebugDumper pcmDebugDumper;
 
     // 내부에서 필요한 기본 객체들을 직접 만듦
     public OpenAiSttProvider() {
-        this(new OpenAiRealtimeClient(), new OpenAiPcmConverter(), new OpenAiRealtimeEventHandler());
+        this(
+                new OpenAiRealtimeClient(),
+                new OpenAiPcmConverter(),
+                new OpenAiRealtimeEventHandler(),
+                new OpenAiPcmDebugDumper());
     }
 
     // 외부에서 객체를 주입할 수 있는 생성자 (테스트 용이성 향상)
     OpenAiSttProvider(
             OpenAiRealtimeClient realtimeClient,
             OpenAiPcmConverter pcmConverter,
-            OpenAiRealtimeEventHandler eventHandler) {
+            OpenAiRealtimeEventHandler eventHandler,
+            OpenAiPcmDebugDumper pcmDebugDumper) {
         this.realtimeClient = Objects.requireNonNull(realtimeClient);
         this.pcmConverter = Objects.requireNonNull(pcmConverter);
         this.eventHandler = Objects.requireNonNull(eventHandler);
+        this.pcmDebugDumper = Objects.requireNonNull(pcmDebugDumper);
     }
 
     @Override
@@ -56,6 +63,7 @@ public class OpenAiSttProvider implements SttProvider {
         } catch (Exception exception) {
             sessions.remove(sessionId, newSession);
             nonNullListener.onError(sessionId, exception);
+            throw new IllegalStateException("Failed to open OpenAI STT session. sessionId=" + sessionId, exception);
         }
     }
 
@@ -67,6 +75,7 @@ public class OpenAiSttProvider implements SttProvider {
         }
         try {
             byte[] realtimePcm = pcmConverter.toRealtimePcm16(pcm16le);
+            pcmDebugDumper.capture(sessionId, pcm16le, realtimePcm);
             session.addSentPcmBytes(realtimePcm.length);
             realtimeClient.appendAudio(session, realtimePcm, timestampMs);
         } catch (Exception exception) {
@@ -86,6 +95,8 @@ public class OpenAiSttProvider implements SttProvider {
         } catch (Exception exception) {
             session.sttListener().onError(sessionId, exception);
             realtimeClient.closeSessionQuietly(session);
+        } finally {
+            pcmDebugDumper.flushSession(sessionId);
         }
     }
 }

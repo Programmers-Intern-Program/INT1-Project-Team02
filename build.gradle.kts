@@ -105,6 +105,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok")
     implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("com.orctom:vad4j:1.0")
 
     // Discord bot (JDA + DAVE)
     // JDA: Discord Gateway/REST 클라이언트 기본 SDK

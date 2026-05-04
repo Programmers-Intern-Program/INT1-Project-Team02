@@ -11,7 +11,10 @@ import com.flodiback.bot.audio.PerUserAudioReceiveHandler;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
+import net.dv8tion.jda.api.audio.hooks.ConnectionListener;
+import net.dv8tion.jda.api.audio.hooks.ConnectionStatus;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -88,20 +91,26 @@ public class DiscordCommandListener extends ListenerAdapter {
         // (디스코드 특성상 봇 1개는 길드 내 음성 채널 1개 연결만 가능)
         PerUserAudioReceiveHandler handler = receiveHandlers.computeIfAbsent(
                 event.getGuild().getIdLong(),
-                guildId -> new PerUserAudioReceiveHandler(guildId, sttProvider, defaultMeetingId));
+                guildId -> new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, defaultMeetingId));
+        handler.updateCaptionChannel(event.getChannel());
 
         // 오디오 수신 핸들러 연결 + 음성 연결
         audioManager.setReceivingHandler(handler);
+        audioManager.setConnectionListener(
+                new LoggingConnectionListener(event.getGuild().getIdLong(), targetChannel));
         audioManager.setAutoReconnect(true);
         audioManager.setSelfMuted(false);
         audioManager.setSelfDeafened(false);
         audioManager.openAudioConnection(targetChannel);
 
         event.getChannel()
-                .sendMessage("입장 완료: "
+                .sendMessage("입장 요청 완료: "
                         + targetChannel.getName()
-                        + " | status="
+                        + " | 현재상태="
                         + audioManager.getConnectionStatus()
+                        + " (오디오 연결은 비동기로 진행됨)"
+                        + ", connected="
+                        + audioManager.isConnected()
                         + ", selfMuted="
                         + audioManager.isSelfMuted()
                         + ", selfDeafened="
@@ -109,11 +118,13 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .queue();
 
         log.info(
-                "Joined voice channel. guildId={}, channelId={}, channelName={}, meetingId={}",
+                "[디스코드/입장] guildId={}, channelId={}, channelName={}, meetingId={}, voiceMemberCount={}, voiceMembers={}",
                 event.getGuild().getId(),
                 targetChannel.getId(),
                 targetChannel.getName(),
-                defaultMeetingId);
+                defaultMeetingId,
+                targetChannel.getMembers().size(),
+                summarizeVoiceMembers(targetChannel));
     }
 
     private void handleLeave(MessageReceivedEvent event) {
@@ -129,9 +140,10 @@ public class DiscordCommandListener extends ListenerAdapter {
         // 디스코드 음성 연결 종료 + 핸들러 해제
         audioManager.closeAudioConnection();
         audioManager.setReceivingHandler(null);
+        audioManager.setConnectionListener(null);
 
         event.getChannel().sendMessage("퇴장 완료").queue();
-        log.info("Left voice channel. guildId={}", event.getGuild().getId());
+        log.info("[디스코드/퇴장] guildId={}", event.getGuild().getId());
     }
 
     private void handleStats(MessageReceivedEvent event) {
@@ -155,5 +167,50 @@ public class DiscordCommandListener extends ListenerAdapter {
         event.getChannel()
                 .sendMessage(connectionSummary + "\n" + handler.getStatsSummary())
                 .queue();
+    }
+
+    private String summarizeVoiceMembers(AudioChannel channel) {
+        if (channel.getMembers().isEmpty()) {
+            return "-";
+        }
+        return channel.getMembers().stream()
+                .map(member -> member.getId() + ":" + member.getUser().getName())
+                .limit(10)
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("-");
+    }
+
+    private final class LoggingConnectionListener implements ConnectionListener {
+        private final long guildId;
+        private final String channelId;
+        private final String channelName;
+
+        private LoggingConnectionListener(long guildId, AudioChannel channel) {
+            this.guildId = guildId;
+            this.channelId = channel.getId();
+            this.channelName = channel.getName();
+        }
+
+        @Override
+        public void onStatusChange(ConnectionStatus status) {
+            log.info(
+                    "[디스코드/오디오상태] guildId={}, channelId={}, channelName={}, status={}",
+                    guildId,
+                    channelId,
+                    channelName,
+                    status);
+        }
+
+        @Override
+        public void onUserSpeakingModeUpdate(
+                User user, java.util.EnumSet<net.dv8tion.jda.api.audio.SpeakingMode> modes) {
+            log.debug(
+                    "[디스코드/말하기상태] guildId={}, channelId={}, userId={}, userName={}, modes={}",
+                    guildId,
+                    channelId,
+                    user.getId(),
+                    user.getName(),
+                    modes);
+        }
     }
 }

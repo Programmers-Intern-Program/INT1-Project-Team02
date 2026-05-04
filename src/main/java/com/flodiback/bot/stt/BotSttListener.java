@@ -5,6 +5,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +23,8 @@ import com.flodiback.bot.BotEnv;
 import com.flodiback.domain.speech.stt.SttListener;
 import com.flodiback.domain.speech.stt.SttResult;
 
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+
 /**
  * STT 결과 소비자.
  *
@@ -24,6 +34,10 @@ import com.flodiback.domain.speech.stt.SttResult;
  */
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
+    private static final long CAPTION_DEBOUNCE_MS = 300L;
+    private static final int CAPTION_MIN_CHARS = 2;
+    private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(new CaptionDebounceThreadFactory());
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -33,19 +47,47 @@ public class BotSttListener implements SttListener {
     private final String speakerName;
     private final String internalBaseUrl;
     private final String internalApiKey;
+    private final MessageChannel captionChannel;
+    private final AtomicReference<String> liveCaptionMessageId = new AtomicReference<>();
+    private final AtomicReference<String> desiredCaptionContent = new AtomicReference<>("");
+    private final AtomicReference<String> renderedCaptionContent = new AtomicReference<>("");
+    private final AtomicBoolean desiredCaptionFinal = new AtomicBoolean(false);
+    private final AtomicBoolean captionMessageCreating = new AtomicBoolean(false);
+    private final AtomicBoolean captionEditInFlight = new AtomicBoolean(false);
+    private final AtomicReference<ScheduledFuture<?>> pendingPartialTask = new AtomicReference<>();
+    private final AtomicReference<String> pendingPartialText = new AtomicReference<>("");
+    private final AtomicLong pendingPartialVersion = new AtomicLong();
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName) {
+        this(meetingId, speakerDiscordId, speakerName, null);
+    }
+
+    public BotSttListener(long meetingId, String speakerDiscordId, String speakerName, MessageChannel captionChannel) {
         this.meetingId = meetingId;
         this.speakerDiscordId = speakerDiscordId;
         this.speakerName = normalizeSpeakerName(speakerName, speakerDiscordId);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
+        this.captionChannel = captionChannel;
     }
 
     @Override
     public void onResult(SttResult result) {
         // 중간 결과(delta)는 저장 API로 보내지 않는다.
         if (!result.isFinal()) {
+            String partialText = result.text();
+            if (partialText != null && !partialText.isBlank()) {
+                int charCount = partialText.codePointCount(0, partialText.length());
+                if (charCount >= CAPTION_MIN_CHARS) {
+                    schedulePartialCaptionUpdate(partialText);
+                }
+                log.info(
+                        "[STT/중간텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
+                        result.sessionId(),
+                        speakerDiscordId,
+                        meetingId,
+                        partialText);
+            }
             return;
         }
 
@@ -54,6 +96,9 @@ public class BotSttListener implements SttListener {
         if (text == null || text.isBlank()) {
             return;
         }
+
+        cancelPendingPartialTask();
+        upsertLiveCaption(text, true);
 
         try {
             // Spring이 관리하는 ObjectMapper가 아니므로 LocalDateTime 직렬화 설정이 없다.
@@ -68,11 +113,17 @@ public class BotSttListener implements SttListener {
 
             // 보안상 원문(text)은 로그에 남기지 않고 길이만 남긴다.
             log.info(
-                    "Final STT result received. sessionId={}, speakerId={}, meetingId={}, textLength={}",
+                    "[STT/최종결과] sessionId={}, speakerId={}, meetingId={}, textLength={}",
                     result.sessionId(),
                     speakerDiscordId,
                     meetingId,
                     text.length());
+            log.info(
+                    "[STT/최종텍스트] sessionId={}, speakerId={}, meetingId={}, text={}",
+                    result.sessionId(),
+                    speakerDiscordId,
+                    meetingId,
+                    text);
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(internalBaseUrl + "/internal/v1/speech"))
@@ -89,7 +140,7 @@ public class BotSttListener implements SttListener {
                     .whenComplete((response, throwable) -> {
                         if (throwable != null) {
                             log.warn(
-                                    "Failed to POST speech. sessionId={}, speakerId={}, meetingId={}",
+                                    "[전송/실패] sessionId={}, speakerId={}, meetingId={}",
                                     result.sessionId(),
                                     speakerDiscordId,
                                     meetingId,
@@ -99,7 +150,7 @@ public class BotSttListener implements SttListener {
 
                         if (response.statusCode() / 100 != 2) {
                             log.warn(
-                                    "Speech POST non-2xx. sessionId={}, speakerId={}, meetingId={}, status={}, body={}",
+                                    "[전송/비정상응답] sessionId={}, speakerId={}, meetingId={}, status={}, body={}",
                                     result.sessionId(),
                                     speakerDiscordId,
                                     meetingId,
@@ -110,7 +161,7 @@ public class BotSttListener implements SttListener {
 
                         // 보안상 원문(text)은 로그에 남기지 않는다.
                         log.info(
-                                "Speech POST success. sessionId={}, speakerId={}, meetingId={}, textLength={}",
+                                "[전송/성공] sessionId={}, speakerId={}, meetingId={}, textLength={}",
                                 result.sessionId(),
                                 speakerDiscordId,
                                 meetingId,
@@ -118,7 +169,7 @@ public class BotSttListener implements SttListener {
                     });
         } catch (Exception exception) {
             log.warn(
-                    "Failed to serialize/send speech. sessionId={}, speakerId={}, meetingId={}",
+                    "[전송/직렬화실패] sessionId={}, speakerId={}, meetingId={}",
                     result.sessionId(),
                     speakerDiscordId,
                     meetingId,
@@ -128,12 +179,10 @@ public class BotSttListener implements SttListener {
 
     @Override
     public void onError(String sessionId, Throwable throwable) {
+        cancelPendingPartialTask();
+        clearLiveCaptionMessage();
         log.warn(
-                "STT error. sessionId={}, speakerId={}, meetingId={}",
-                sessionId,
-                speakerDiscordId,
-                meetingId,
-                throwable);
+                "[STT/오류] sessionId={}, speakerId={}, meetingId={}", sessionId, speakerDiscordId, meetingId, throwable);
     }
 
     private String normalizeBaseUrl(String baseUrl) {
@@ -149,5 +198,152 @@ public class BotSttListener implements SttListener {
             return "user-" + speakerId;
         }
         return rawSpeakerName.trim();
+    }
+
+    private void upsertLiveCaption(String text, boolean isFinal) {
+        if (captionChannel == null || text == null || text.isBlank()) {
+            return;
+        }
+
+        desiredCaptionContent.set(formatCaption(text, isFinal));
+        desiredCaptionFinal.set(isFinal);
+        syncLiveCaption();
+    }
+
+    private void schedulePartialCaptionUpdate(String partialText) {
+        long version = pendingPartialVersion.incrementAndGet();
+        pendingPartialText.set(partialText);
+        ScheduledFuture<?> previous = pendingPartialTask.getAndSet(CAPTION_DEBOUNCE_EXECUTOR.schedule(
+                () -> {
+                    if (version != pendingPartialVersion.get()) {
+                        return;
+                    }
+                    String latest = pendingPartialText.getAndSet("");
+                    if (latest != null && !latest.isBlank()) {
+                        upsertLiveCaption(latest, false);
+                    }
+                    pendingPartialTask.set(null);
+                },
+                CAPTION_DEBOUNCE_MS,
+                TimeUnit.MILLISECONDS));
+
+        if (previous != null) {
+            previous.cancel(false);
+        }
+    }
+
+    private void cancelPendingPartialTask() {
+        ScheduledFuture<?> pending = pendingPartialTask.getAndSet(null);
+        if (pending != null) {
+            pending.cancel(false);
+        }
+        pendingPartialText.set("");
+        pendingPartialVersion.incrementAndGet();
+    }
+
+    private void syncLiveCaption() {
+        String messageId = liveCaptionMessageId.get();
+        if (messageId == null) {
+            if (!captionMessageCreating.compareAndSet(false, true)) {
+                return;
+            }
+            String messageContent = desiredCaptionContent.get();
+            captionChannel
+                    .sendMessage(messageContent)
+                    .queue(
+                            message -> {
+                                liveCaptionMessageId.set(message.getId());
+                                renderedCaptionContent.set(messageContent);
+                                captionMessageCreating.set(false);
+                                if (!messageContent.equals(desiredCaptionContent.get())) {
+                                    syncLiveCaption();
+                                    return;
+                                }
+                                if (desiredCaptionFinal.get()) {
+                                    clearLiveCaptionState();
+                                }
+                            },
+                            throwable -> {
+                                captionMessageCreating.set(false);
+                                log.warn(
+                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}",
+                                        speakerDiscordId,
+                                        meetingId,
+                                        throwable);
+                            });
+            return;
+        }
+
+        String desiredContent = desiredCaptionContent.get();
+        String renderedContent = renderedCaptionContent.get();
+        if (desiredContent.equals(renderedContent)) {
+            return;
+        }
+        if (!captionEditInFlight.compareAndSet(false, true)) {
+            return;
+        }
+
+        captionChannel
+                .editMessageById(messageId, desiredContent)
+                .queue(
+                        message -> {
+                            renderedCaptionContent.set(desiredContent);
+                            captionEditInFlight.set(false);
+                            if (!desiredContent.equals(desiredCaptionContent.get())) {
+                                syncLiveCaption();
+                                return;
+                            }
+                            if (desiredCaptionFinal.get()) {
+                                clearLiveCaptionState();
+                            }
+                        },
+                        throwable -> {
+                            captionEditInFlight.set(false);
+                            log.warn(
+                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    throwable);
+                        });
+    }
+
+    private String formatCaption(String text, boolean isFinal) {
+        return "[" + speakerName + "] " + text + (isFinal ? " [final]" : "");
+    }
+
+    private void clearLiveCaptionState() {
+        liveCaptionMessageId.set(null);
+        desiredCaptionContent.set("");
+        renderedCaptionContent.set("");
+        desiredCaptionFinal.set(false);
+        captionMessageCreating.set(false);
+        captionEditInFlight.set(false);
+    }
+
+    private void clearLiveCaptionMessage() {
+        String messageId = liveCaptionMessageId.get();
+        if (captionChannel != null && messageId != null) {
+            captionChannel
+                    .deleteMessageById(messageId)
+                    .queue(
+                            ignored -> {},
+                            throwable -> log.debug(
+                                    "[STT/자막메시지삭제실패] speakerId={}, meetingId={}, messageId={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    throwable));
+        }
+        clearLiveCaptionState();
+    }
+
+    private static final class CaptionDebounceThreadFactory implements ThreadFactory {
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "stt-caption-debounce");
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }
