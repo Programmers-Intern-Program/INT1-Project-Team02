@@ -3,8 +3,12 @@ package com.flodiback.domain.meeting.analysis.service;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
@@ -12,6 +16,7 @@ import com.flodiback.domain.meeting.analysis.dto.DecisionItem;
 import com.flodiback.domain.meeting.analysis.dto.WorkLogItem;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
@@ -24,7 +29,9 @@ import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -53,6 +60,17 @@ public class MeetingAnalysisService {
     private final ContextService contextService;
     private final GlmClient glmClient;
     private final ObjectMapper objectMapper;
+
+    @Async("analysisExecutor")
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleMeetingEnded(MeetingEndedEvent event) {
+        try {
+            analyze(event.meetingId());
+        } catch (Exception e) {
+            log.warn("회의 분석 실패 - meetingId={}: {}", event.meetingId(), e.getMessage());
+        }
+    }
 
     public void analyze(Long meetingId) {
         // 1. 회의 조회

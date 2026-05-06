@@ -5,4 +5,9 @@ import java.time.LocalDateTime;
 import com.flodiback.global.enums.MeetingStatus;
 
 public record CreateMeetingResponse(
-        Long id, Long projectId, String title, LocalDateTime startedAt, MeetingStatus status) {}
+        Long id,
+        Long projectId,
+        String title,
+        LocalDateTime startedAt,
+        MeetingStatus status,
+        boolean projectConnected) {}
