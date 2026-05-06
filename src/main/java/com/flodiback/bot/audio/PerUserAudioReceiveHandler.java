@@ -60,6 +60,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final long meetingId;
     private final SttProvider sttProvider;
     private final ScheduledExecutorService silenceWatcher;
+    private final ScheduledExecutorService sttIoExecutor;
     private final Guild guild;
     private volatile MessageChannel captionChannel;
 
@@ -110,6 +111,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
         this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
+        this.sttIoExecutor = Executors.newSingleThreadScheduledExecutor(new SttIoThreadFactory(guildId));
         this.silenceWatcher.scheduleAtFixedRate(
                 this::endInactiveSttSessionsOnSchedule,
                 STT_SILENCE_WATCH_INTERVAL_MS,
@@ -193,7 +195,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     } else {
                         session.lastAudioAtMs.set(now);
                         for (byte[] preRollFrame : stats.preRollBuffer.drain()) {
-                            sendToActiveSession(session, userId, preRollFrame, now);
+                            submitSttSendTask(session, userId, preRollFrame, now);
                         }
                     }
                 } else {
@@ -286,9 +288,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             Long userId = entry.getKey();
             ActiveSttSession activeSession = entry.getValue();
             if (activeSttSessionsByUserId.remove(userId, activeSession)) {
-                safelyEndSession(activeSession, "manual_close_all");
+                endSessionNow(activeSession, "manual_close_all");
             }
         }
+        sttIoExecutor.shutdownNow();
         for (VAD vad : webRtcVadByUserId.values()) {
             closeVadQuietly(vad);
         }
@@ -389,17 +392,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
 
         session.lastAudioAtMs.set(now);
-
-        try {
-            sendToActiveSession(session, userId, decodedPcm, now);
-        } catch (Exception sendException) {
-            log.warn(
-                    "[STT/PCM전달실패] guildId={}, sessionId={}, userId={}",
-                    guildId,
-                    session.sessionId,
-                    userId,
-                    sendException);
-        }
+        submitSttSendTask(session, userId, decodedPcm, now);
     }
 
     /**
@@ -421,29 +414,11 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             return previous;
         }
 
-        try {
-            // 세션 시작 시점에 결과 소비자(BotSttListener)를 함께 바인딩한다.
-            BotSttListener listener = new BotSttListener(meetingId, speakerId, normalizedSpeakerName, captionChannel);
-            sttProvider.startSession(sessionId, speakerId, listener);
-            log.info(
-                    "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
-                    guildId,
-                    meetingId,
-                    userId,
-                    sessionId,
-                    normalizedSpeakerName);
-            return created;
-        } catch (Exception startException) {
+        if (!submitSttStartTask(userId, created, normalizedSpeakerName)) {
             activeSttSessionsByUserId.remove(userId, created);
-            log.warn(
-                    "[STT/세션시작실패] guildId={}, meetingId={}, userId={}, sessionId={}",
-                    guildId,
-                    meetingId,
-                    userId,
-                    sessionId,
-                    startException);
             return null;
         }
+        return created;
     }
 
     private String resolveSpeakerName(long userId, String fallbackSpeakerName) {
@@ -468,8 +443,74 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     }
 
     private void sendToActiveSession(ActiveSttSession session, long userId, byte[] pcm, long now) {
+        ActiveSttSession current = activeSttSessionsByUserId.get(userId);
+        if (current != session) {
+            return;
+        }
         session.lastAudioAtMs.set(now);
         sttProvider.sendPcm(session.sessionId, pcm, now);
+    }
+
+    private boolean submitSttStartTask(long userId, ActiveSttSession session, String speakerName) {
+        try {
+            sttIoExecutor.execute(() -> {
+                try {
+                    BotSttListener listener =
+                            new BotSttListener(meetingId, session.speakerId, speakerName, captionChannel);
+                    sttProvider.startSession(session.sessionId, session.speakerId, listener);
+                    log.info(
+                            "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
+                            guildId,
+                            meetingId,
+                            userId,
+                            session.sessionId,
+                            speakerName);
+                } catch (Exception startException) {
+                    activeSttSessionsByUserId.remove(userId, session);
+                    log.warn(
+                            "[STT/세션시작실패] guildId={}, meetingId={}, userId={}, sessionId={}",
+                            guildId,
+                            meetingId,
+                            userId,
+                            session.sessionId,
+                            startException);
+                }
+            });
+            return true;
+        } catch (Exception queueException) {
+            log.warn(
+                    "[STT/시작큐등록실패] guildId={}, meetingId={}, userId={}, sessionId={}",
+                    guildId,
+                    meetingId,
+                    userId,
+                    session.sessionId,
+                    queueException);
+            return false;
+        }
+    }
+
+    private void submitSttSendTask(ActiveSttSession session, long userId, byte[] pcm, long now) {
+        try {
+            sttIoExecutor.execute(() -> {
+                try {
+                    sendToActiveSession(session, userId, pcm, now);
+                } catch (Exception sendException) {
+                    log.warn(
+                            "[STT/PCM전달실패] guildId={}, sessionId={}, userId={}",
+                            guildId,
+                            session.sessionId,
+                            userId,
+                            sendException);
+                }
+            });
+        } catch (Exception queueException) {
+            log.warn(
+                    "[STT/전송큐등록실패] guildId={}, sessionId={}, userId={}",
+                    guildId,
+                    session.sessionId,
+                    userId,
+                    queueException);
+        }
     }
 
     /**
@@ -497,6 +538,24 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * STT 세션 종료를 예외 안전하게 실행한다.
      */
     private void safelyEndSession(ActiveSttSession session, String reason) {
+        submitSttEndTask(session, reason);
+    }
+
+    private void submitSttEndTask(ActiveSttSession session, String reason) {
+        try {
+            sttIoExecutor.execute(() -> endSessionNow(session, reason));
+        } catch (Exception queueException) {
+            log.warn(
+                    "[STT/종료큐등록실패] guildId={}, meetingId={}, sessionId={}, reason={}",
+                    guildId,
+                    meetingId,
+                    session.sessionId,
+                    reason,
+                    queueException);
+        }
+    }
+
+    private void endSessionNow(ActiveSttSession session, String reason) {
         try {
             sttProvider.endSession(session.sessionId);
             log.info(
@@ -782,6 +841,21 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         @Override
         public Thread newThread(Runnable runnable) {
             Thread thread = new Thread(runnable, "stt-silence-watcher-guild-" + guildId);
+            thread.setDaemon(true);
+            return thread;
+        }
+    }
+
+    private static final class SttIoThreadFactory implements ThreadFactory {
+        private final long guildId;
+
+        private SttIoThreadFactory(long guildId) {
+            this.guildId = guildId;
+        }
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "stt-io-guild-" + guildId);
             thread.setDaemon(true);
             return thread;
         }
