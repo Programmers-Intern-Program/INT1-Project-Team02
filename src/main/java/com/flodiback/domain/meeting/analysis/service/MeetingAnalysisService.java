@@ -5,6 +5,7 @@ import java.util.NoSuchElementException;
 
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -61,6 +62,7 @@ public class MeetingAnalysisService {
     private final ObjectMapper objectMapper;
 
     @Async("analysisExecutor")
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleMeetingEnded(MeetingEndedEvent event) {
         try {
