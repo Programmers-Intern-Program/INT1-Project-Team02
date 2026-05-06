@@ -10,22 +10,15 @@ import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 
 public interface UtteranceRepository extends JpaRepository<Utterance, Long> {
 
-    List<Utterance> findTop20ByMeetingIdOrderBySpokenAtDesc(Long meetingId);
+    List<Utterance> findTop20ByMeetingIdOrderBySpeechStartedAtDesc(Long meetingId);
 
-    List<Utterance> findByMeetingOrderBySpokenAtAsc(Meeting meeting);
-
-    List<Utterance> findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(Meeting meeting, Long sequenceNo);
+    List<Utterance> findByMeetingOrderBySpeechStartedAtAsc(Meeting meeting);
 
     List<Utterance> findByMeetingAndCreatedAtLessThanEqualOrderByCreatedAtAsc(Meeting meeting, LocalDateTime safeUntil);
 
     List<Utterance> findByMeetingAndCreatedAtGreaterThanAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
             Meeting meeting, LocalDateTime after, LocalDateTime safeUntil);
 
-    List<Utterance> findByMeetingAndSequenceNoGreaterThanAndCreatedAtLessThanEqualOrderBySequenceNoAsc(
-            Meeting meeting, Long sequenceNo, LocalDateTime safeUntil);
-
-    List<Utterance> findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
+    List<Utterance> findByMeetingAndCreatedAtGreaterThanOrderBySpeechStartedAtAscIdAsc(
             Meeting meeting, LocalDateTime after);
-
-    long countByMeeting(Meeting meeting);
 }

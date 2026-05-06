@@ -90,7 +90,7 @@ public class MeetingAnalysisService {
 
     private String buildContext(Meeting meeting) {
         List<ContextCache> caches = contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting);
-        List<Utterance> utterances = utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting);
+        List<Utterance> utterances = utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting);
 
         StringBuilder sb = new StringBuilder();
 

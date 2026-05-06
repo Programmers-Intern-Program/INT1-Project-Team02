@@ -4,9 +4,9 @@ import java.time.LocalDateTime;
 
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 
-public record UtteranceSummary(String speakerName, String content, LocalDateTime spokenAt) {
+public record UtteranceSummary(String speakerName, String content, LocalDateTime speechStartedAt) {
 
     public static UtteranceSummary from(Utterance utterance) {
-        return new UtteranceSummary(utterance.getSpeakerName(), utterance.getContent(), utterance.getSpokenAt());
+        return new UtteranceSummary(utterance.getSpeakerName(), utterance.getContent(), utterance.getSpeechStartedAt());
     }
 }

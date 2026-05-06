@@ -8,13 +8,17 @@ Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
 요청 본문:
 ```json
 {
-  "meeting_id": "...",
-  "speaker_discord_id": "...",
+  "meeting_id": 1,
+  "speaker_discord_id": "123456789",
   "speaker_name": "김철수",
   "text": "이번 스프린트 목표를 어떻게 잡을까요?",
-  "timestamp": "2026-04-23T10:30:00"
+  "speech_started_at": "2026-04-23T10:30:00",
+  "speech_ended_at": "2026-04-23T10:30:05"
 }
 ```
+
+- `speech_started_at` (필수): 봇 STT `startMs` (Unix epoch ms) 를 LocalDateTime으로 변환한 발화 시작 시각
+- `speech_ended_at` (선택): 봇 STT `endMs` (Unix epoch ms) 를 LocalDateTime으로 변환한 발화 종료 시각
 
 응답 본문:
 ```json

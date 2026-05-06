@@ -42,7 +42,7 @@ class UtteranceRepositoryTest extends AbstractPostgresIntegrationTest {
         em.persist(utterance(other, "Bob", "b1", "다른 회의 발화"));
         em.flush();
 
-        List<Utterance> result = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meeting.getId());
+        List<Utterance> result = utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meeting.getId());
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getSpeakerName()).isEqualTo("Alice");
@@ -55,7 +55,7 @@ class UtteranceRepositoryTest extends AbstractPostgresIntegrationTest {
         }
         em.flush();
 
-        List<Utterance> result = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meeting.getId());
+        List<Utterance> result = utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meeting.getId());
 
         assertThat(result).hasSize(20);
     }
@@ -66,7 +66,6 @@ class UtteranceRepositoryTest extends AbstractPostgresIntegrationTest {
                 .speakerName(name)
                 .speakerDiscordId(discordId)
                 .content(content)
-                .sequenceNo((long) (Math.random() * 100000))
                 .build();
     }
 }

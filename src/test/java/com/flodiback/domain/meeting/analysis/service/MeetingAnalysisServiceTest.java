@@ -82,14 +82,12 @@ class MeetingAnalysisServiceTest {
                 .speakerName("홍길동")
                 .speakerDiscordId("user1")
                 .content("API 명세 확정했습니다.")
-                .sequenceNo(1L)
                 .build();
         Utterance u2 = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("김철수")
                 .speakerDiscordId("user2")
                 .content("다음 주 월요일까지 구현 완료 예정입니다.")
-                .sequenceNo(2L)
                 .build();
 
         String glmResponse = """
@@ -108,7 +106,8 @@ class MeetingAnalysisServiceTest {
 
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
-        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of(u1, u2));
+        given(utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting))
+                .willReturn(List.of(u1, u2));
         given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
@@ -140,15 +139,12 @@ class MeetingAnalysisServiceTest {
                 .version(1)
                 .compressedText("지난 회의 요약 내용")
                 .tokenCount(100)
-                .startSequenceNo(1L)
-                .endSequenceNo(10L)
                 .build();
         Utterance utterance = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("홍길동")
                 .speakerDiscordId("user1")
                 .content("오늘 안건입니다.")
-                .sequenceNo(1L)
                 .build();
 
         String glmResponse = """
@@ -162,7 +158,8 @@ class MeetingAnalysisServiceTest {
 
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of(cache));
-        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of(utterance));
+        given(utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting))
+                .willReturn(List.of(utterance));
         given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
@@ -197,7 +194,8 @@ class MeetingAnalysisServiceTest {
 
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
-        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting))
+                .willReturn(List.of());
         given(glmClient.chat(anyString(), anyString())).willReturn(glmResponseWithCodeBlock);
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
@@ -223,7 +221,8 @@ class MeetingAnalysisServiceTest {
 
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting)).willReturn(List.of());
-        given(utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting)).willReturn(List.of());
+        given(utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting))
+                .willReturn(List.of());
         given(glmClient.chat(anyString(), anyString())).willReturn("이건 JSON이 아닙니다");
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));

@@ -33,12 +33,6 @@ public class ContextCache {
     @Column(name = "token_count", nullable = false)
     private Integer tokenCount;
 
-    @Column(name = "start_sequence_no", nullable = false)
-    private Long startSequenceNo;
-
-    @Column(name = "end_sequence_no", nullable = false)
-    private Long endSequenceNo;
-
     @Column(name = "compressed_until_created_at")
     private LocalDateTime compressedUntilCreatedAt;
 
@@ -52,15 +46,11 @@ public class ContextCache {
             Integer version,
             String compressedText,
             Integer tokenCount,
-            Long startSequenceNo,
-            Long endSequenceNo,
             LocalDateTime compressedUntilCreatedAt) {
         this.meeting = meeting;
         this.version = version;
         this.compressedText = compressedText;
         this.tokenCount = tokenCount;
-        this.startSequenceNo = startSequenceNo;
-        this.endSequenceNo = endSequenceNo;
         this.compressedUntilCreatedAt = compressedUntilCreatedAt;
     }
 }

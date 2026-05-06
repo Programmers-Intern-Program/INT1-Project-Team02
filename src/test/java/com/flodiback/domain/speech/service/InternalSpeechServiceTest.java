@@ -77,6 +77,12 @@ class InternalSpeechServiceTest {
     }
 
     private InternalSpeechRequest request(String text) {
-        return new InternalSpeechRequest(1L, "discord-1", "김철수", text, LocalDateTime.of(2026, 5, 3, 10, 0));
+        return new InternalSpeechRequest(
+                1L,
+                "discord-1",
+                "김철수",
+                text,
+                LocalDateTime.of(2026, 5, 3, 10, 0),
+                LocalDateTime.of(2026, 5, 3, 10, 0, 5));
     }
 }

@@ -79,7 +79,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "이번 스프린트 목표를 어떻게 잡을까요?",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """.formatted(meeting.getId());
 
@@ -99,7 +100,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
         assertThat(savedUtterance.getSpeakerDiscordId()).isEqualTo("123456789");
         assertThat(savedUtterance.getSpeakerName()).isEqualTo("김철수");
         assertThat(savedUtterance.getContent()).isEqualTo("이번 스프린트 목표를 어떻게 잡을까요?");
-        assertThat(savedUtterance.getSpokenAt()).isEqualTo(LocalDateTime.of(2026, 4, 23, 10, 30));
+        assertThat(savedUtterance.getSpeechStartedAt()).isEqualTo(LocalDateTime.of(2026, 4, 23, 10, 30));
     }
 
     @Test
@@ -110,7 +111,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "회의가 없는 경우입니다.",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """;
 
@@ -129,7 +131,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """.formatted(meeting.getId());
 
@@ -151,7 +154,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "AI야, 인증 방식 뭐로 하기로 했지?",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """.formatted(meeting.getId());
 
@@ -176,7 +180,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "AI야",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """.formatted(meeting.getId());
 
@@ -200,7 +205,8 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
                   "text": "봇아, 토큰 만료 시간 정했어?",
-                  "timestamp": "2026-04-23T10:30:00"
+                  "speech_started_at": "2026-04-23T10:30:00",
+                  "speech_ended_at": "2026-04-23T10:30:05"
                 }
                 """.formatted(meeting.getId());
 

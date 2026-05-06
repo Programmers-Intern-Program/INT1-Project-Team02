@@ -76,20 +76,15 @@ public class ContextService {
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         if (latestCache == null) {
-            List<Utterance> recentUtterances = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meetingId);
+            List<Utterance> recentUtterances =
+                    utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meetingId);
             Collections.reverse(recentUtterances);
             return new ShortTermParts(null, recentUtterances);
         }
 
-        List<Utterance> utterancesAfterCache;
-        if (latestCache.getCompressedUntilCreatedAt() != null) {
-            utterancesAfterCache =
-                    utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
-                            meeting, latestCache.getCompressedUntilCreatedAt());
-        } else {
-            utterancesAfterCache = utteranceRepository.findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(
-                    meeting, latestCache.getEndSequenceNo());
-        }
+        List<Utterance> utterancesAfterCache =
+                utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpeechStartedAtAscIdAsc(
+                        meeting, latestCache.getCompressedUntilCreatedAt());
         return new ShortTermParts(
                 latestCache.getCompressedText(), takeLatest(utterancesAfterCache, RECENT_UTTERANCE_LIMIT));
     }
