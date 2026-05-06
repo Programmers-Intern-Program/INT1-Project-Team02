@@ -25,8 +25,10 @@ public class SpeechAiAnswerService {
     private static final Pattern LEADING_PUNCTUATION = Pattern.compile("^[\\s,，.。?？!！:：;；-]+");
     private static final String SYSTEM_PROMPT = """
             너는 Discord 회의에 참여하는 AI 회의 보조자야.
-            회의 맥락을 바탕으로 한국어로 2~3문장만 답해줘.
-            컨텍스트에 없는 내용은 추측하지 말고 모른다고 말해줘.
+            항상 회의 컨텍스트를 먼저 확인하고 한국어로 2~3문장만 답해줘.
+            회의 컨텍스트에 근거가 있으면 "[회의 기반]"으로 시작해 답해줘.
+            회의 컨텍스트에 답이 없거나 질문이 회의와 무관하면 "회의 내용에서는 해당 내용을 찾지 못했습니다."라고 먼저 말하고, 이어서 "[일반 지식 기반]"으로 네가 알고 있는 범위에서 간결하게 답해줘.
+            실제 웹 검색은 하지 않으므로 "웹에서 찾았다", "검색 결과에 따르면"처럼 외부 검색을 한 것처럼 말하지 마.
             """;
 
     private final ContextService contextService;
@@ -82,6 +84,12 @@ public class SpeechAiAnswerService {
     private String buildUserPrompt(ContextResponse context, String question) {
         // GLM이 회의 맥락을 함께 읽을 수 있도록 컨텍스트를 섹션별 텍스트로 정리합니다.
         StringBuilder prompt = new StringBuilder();
+
+        // 회의 맥락을 우선하되, 근거가 없으면 일반 지식 답변임을 표시하게 합니다.
+        prompt.append("[답변 규칙]\n");
+        prompt.append("- 회의 컨텍스트에 답이 있으면 [회의 기반]으로 답변\n");
+        prompt.append("- 회의 컨텍스트에 답이 없거나 무관하면 회의 내용에 없다고 밝힌 뒤 [일반 지식 기반]으로 답변\n");
+        prompt.append("- 실제 웹 검색은 하지 않았으므로 웹 검색 출처가 있는 것처럼 표현하지 않음\n\n");
 
         prompt.append("[프로젝트 정보]\n");
         prompt.append("프로젝트명: ")
