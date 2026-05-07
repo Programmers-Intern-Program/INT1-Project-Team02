@@ -2,6 +2,7 @@ package com.flodiback.api.project;
 
 import java.util.List;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,5 +38,11 @@ public class ProjectController {
     @GetMapping("/{id}")
     public RsData<ProjectResponse> getById(@PathVariable Long id) {
         return RsData.of("200-1", "프로젝트 조회 성공.", projectService.getById(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public RsData<Void> delete(@PathVariable Long id) {
+        projectService.delete(id);
+        return RsData.of("200-1", "프로젝트가 삭제되었습니다.");
     }
 }

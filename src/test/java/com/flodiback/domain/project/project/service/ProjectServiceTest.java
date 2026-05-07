@@ -139,4 +139,30 @@ class ProjectServiceTest {
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 프로젝트입니다.");
     }
+
+    // ─── delete ───────────────────────────────────────────
+
+    @Test
+    void delete_유효한_id면_소프트삭제() {
+        // given
+        Project project = Project.builder().name("플로디 프로젝트").build();
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+
+        // when
+        projectService.delete(1L);
+
+        // then
+        assertThat(project.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void delete_존재하지않는_id면_예외발생() {
+        // given
+        given(projectRepository.findById(999L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> projectService.delete(999L))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("존재하지 않는 프로젝트입니다.");
+    }
 }

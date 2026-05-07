@@ -54,6 +54,12 @@ public class ProjectService {
         return toResponse(project);
     }
 
+    public void delete(Long id) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        project.softDelete();
+    }
+
     ProjectResponse toResponse(Project project) {
         return new ProjectResponse(
                 project.getId(),
