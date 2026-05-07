@@ -1,6 +1,5 @@
 package com.flodiback.domain.meeting.meetinglog.service;
 
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
@@ -26,6 +25,7 @@ import com.flodiback.domain.project.worklog.entity.WorkLog;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 import com.flodiback.global.exception.ServiceException;
+import com.flodiback.global.util.TokenEstimator;
 import com.pgvector.PGvector;
 
 import lombok.RequiredArgsConstructor;
@@ -40,7 +40,8 @@ public class ContextService {
     private static final double SEMANTIC_WEIGHT = 0.7;
     private static final double KEYWORD_WEIGHT = 0.3;
     private static final int TOP_K = 5;
-    private static final int RECENT_UTTERANCE_LIMIT = 20;
+    private static final int UNCOMPRESSED_TOKEN_BUDGET = 2000;
+    private static final int MIN_RECENT_UTTERANCE_COUNT = 20;
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
@@ -58,7 +59,7 @@ public class ContextService {
                 .findById(meetingId)
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
 
-        ShortTermParts shortTerm = resolveShortTerm(meeting, meetingId);
+        ShortTermParts shortTerm = resolveShortTerm(meeting);
 
         Project project = meeting.getProject();
         if (project == null) {
@@ -72,29 +73,44 @@ public class ContextService {
                 project, shortTerm.rollingSummary(), shortTerm.recentUtterances(), decisions, pastSummaries);
     }
 
-    private ShortTermParts resolveShortTerm(Meeting meeting, Long meetingId) {
+    private ShortTermParts resolveShortTerm(Meeting meeting) {
         ContextCache latestCache = contextCacheRepository
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         if (latestCache == null) {
-            List<Utterance> recentUtterances =
-                    utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meetingId);
-            Collections.reverse(recentUtterances);
-            return new ShortTermParts(null, recentUtterances);
+            List<Utterance> utterances = utteranceRepository.findByMeetingOrderByIdAsc(meeting);
+            return new ShortTermParts(null, sortForPrompt(fitToTokenBudget(utterances)));
         }
 
         List<Utterance> utterancesAfterCache = utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
                 meeting, latestCache.getCompressedUntilUtteranceId());
         return new ShortTermParts(
-                latestCache.getCompressedText(),
-                sortForPrompt(takeLatest(utterancesAfterCache, RECENT_UTTERANCE_LIMIT)));
+                latestCache.getCompressedText(), sortForPrompt(fitToTokenBudget(utterancesAfterCache)));
     }
 
-    private List<Utterance> takeLatest(List<Utterance> utterances, int limit) {
-        if (utterances.size() <= limit) {
-            return utterances;
+    private List<Utterance> fitToTokenBudget(List<Utterance> utterances) {
+        int tokenSum = 0;
+        int selectedCount = 0;
+        int start = utterances.size();
+
+        for (int i = utterances.size() - 1; i >= 0; i--) {
+            int tokens = estimateTokens(utterances.get(i));
+            if (tokenSum + tokens > UNCOMPRESSED_TOKEN_BUDGET && selectedCount >= MIN_RECENT_UTTERANCE_COUNT) {
+                break;
+            }
+
+            tokenSum += tokens;
+            selectedCount++;
+            start = i;
         }
-        return utterances.subList(utterances.size() - limit, utterances.size());
+
+        return utterances.subList(start, utterances.size());
+    }
+
+    private int estimateTokens(Utterance utterance) {
+        return utterance.getTokenCount() != null
+                ? utterance.getTokenCount()
+                : TokenEstimator.estimate(utterance.getContent());
     }
 
     private List<Utterance> sortForPrompt(List<Utterance> utterances) {

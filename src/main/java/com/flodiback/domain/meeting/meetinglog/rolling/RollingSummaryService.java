@@ -18,8 +18,23 @@ public class RollingSummaryService {
 
     private static final String SYSTEM_PROMPT = """
             당신은 회의 내용을 압축하는 AI 요약기입니다.
-            이전 요약이 있으면 유지해야 할 결정, 미결사항, 작업 맥락을 보존하고,
-            새 발화에서 추가된 핵심만 반영해 현재 회의 rolling summary를 한국어로 갱신하세요.
+            이전 rolling summary와 새 발화를 합쳐 현재 회의 상태를 갱신하세요.
+            이전 rolling summary에 이미 있는 결정사항, 미결 사항, 액션 아이템은 보존하고,
+            새 발화에서 나온 항목을 병합하세요.
+            새 발화에서 기존 항목이 취소되거나 변경되면 최신 발화를 우선하세요.
+            반드시 아래 섹션을 유지하고, 내용이 없는 섹션은 "- 없음"으로 채우세요.
+
+            [흐름 요약]
+            ...
+
+            [현재 회의 결정사항]
+            - ...
+
+            [미결 사항]
+            - ...
+
+            [액션 아이템]
+            - ...
             """;
 
     private final RollingSummaryPersistenceService rollingSummaryPersistenceService;

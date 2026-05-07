@@ -85,6 +85,14 @@ class RollingSummaryPersistenceServiceTest {
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isNull();
         assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(11L);
         assertThat(candidate.userPrompt()).contains("content-1").doesNotContain("content-31");
+        assertThat(candidate.userPrompt())
+                .contains("[출력]")
+                .contains("[흐름 요약]")
+                .contains("[현재 회의 결정사항]")
+                .contains("[미결 사항]")
+                .contains("[액션 아이템]")
+                .contains("보존")
+                .contains("병합");
         assertThat(candidate.nextVersion()).isEqualTo(1);
     }
 

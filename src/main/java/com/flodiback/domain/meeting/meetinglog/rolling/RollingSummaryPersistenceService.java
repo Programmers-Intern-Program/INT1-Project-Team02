@@ -142,7 +142,14 @@ public class RollingSummaryPersistenceService {
                 .append("] ")
                 .append(utterance.getContent())
                 .append("\n"));
-        prompt.append("\n[출력]\n현재 회의 rolling summary만 작성하세요.");
+        prompt.append("""
+
+                [출력]
+                [흐름 요약], [현재 회의 결정사항], [미결 사항], [액션 아이템] 섹션으로 구분해 작성하세요.
+                이전 rolling summary에 있던 항목은 보존하고 새 발화에서 나온 항목을 병합하세요.
+                새 발화에서 기존 항목이 취소되거나 변경되면 최신 발화를 우선하세요.
+                내용이 없는 섹션은 "- 없음"으로 채우세요.
+                """);
         return prompt.toString();
     }
 

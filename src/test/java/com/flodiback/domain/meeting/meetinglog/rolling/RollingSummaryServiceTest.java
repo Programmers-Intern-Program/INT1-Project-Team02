@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
 
@@ -33,6 +34,23 @@ class RollingSummaryServiceTest {
 
         assertThat(AnnotatedElementUtils.hasAnnotation(compressIfNeeded, Transactional.class))
                 .isFalse();
+    }
+
+    @Test
+    void systemPrompt_containsStructuredSectionsAndMergeInstruction() throws Exception {
+        Field promptField = RollingSummaryService.class.getDeclaredField("SYSTEM_PROMPT");
+        promptField.setAccessible(true);
+
+        String prompt = (String) promptField.get(null);
+
+        assertThat(prompt)
+                .contains("[흐름 요약]")
+                .contains("[현재 회의 결정사항]")
+                .contains("[미결 사항]")
+                .contains("[액션 아이템]")
+                .contains("보존")
+                .contains("병합")
+                .contains("최신 발화");
     }
 
     @Test
