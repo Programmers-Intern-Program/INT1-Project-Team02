@@ -39,8 +39,10 @@ public class BotSttListener implements SttListener {
     private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
     private static final long CAPTION_DEBOUNCE_MS = 300L;
     private static final int CAPTION_MIN_CHARS = 2;
+    private static final long STT_QUALITY_LOG_INTERVAL_MS = 60_000L;
     private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
             Executors.newSingleThreadScheduledExecutor(new CaptionDebounceThreadFactory());
+    private static final SttQualityWindowMetrics STT_QUALITY_METRICS = new SttQualityWindowMetrics();
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -99,6 +101,8 @@ public class BotSttListener implements SttListener {
         if (text == null || text.isBlank()) {
             return;
         }
+        STT_QUALITY_METRICS.recordFinalText(text);
+        maybeLogSttQualityMetrics();
 
         cancelPendingPartialTask();
         upsertLiveCaption(text, true);
@@ -376,6 +380,14 @@ public class BotSttListener implements SttListener {
         }
     }
 
+    private void maybeLogSttQualityMetrics() {
+        String summary = STT_QUALITY_METRICS.snapshotAndRotateIfDue();
+        if (summary == null) {
+            return;
+        }
+        log.info("[STT/품질요약] meetingId={}, speakerId={}, {}", meetingId, speakerDiscordId, summary);
+    }
+
     private boolean containsWakeWord(String text) {
         if (text == null || text.isBlank()) {
             return false;
@@ -394,6 +406,53 @@ public class BotSttListener implements SttListener {
             Thread thread = new Thread(runnable, "stt-caption-debounce");
             thread.setDaemon(true);
             return thread;
+        }
+    }
+
+    private static final class SttQualityWindowMetrics {
+        private long windowStartedAtMs = System.currentTimeMillis();
+        private long finalCount = 0L;
+        private long totalTextLength = 0L;
+        private long replacementCharTexts = 0L;
+
+        synchronized void recordFinalText(String text) {
+            long now = System.currentTimeMillis();
+            rotateIfNeeded(now);
+            finalCount++;
+            totalTextLength += text.length();
+            if (text.indexOf('\uFFFD') >= 0) {
+                replacementCharTexts++;
+            }
+        }
+
+        synchronized String snapshotAndRotateIfDue() {
+            long now = System.currentTimeMillis();
+            if (now - windowStartedAtMs < STT_QUALITY_LOG_INTERVAL_MS) {
+                return null;
+            }
+            double avgLen = finalCount == 0 ? 0.0 : (double) totalTextLength / finalCount;
+            double replacementRatio = finalCount == 0 ? 0.0 : (replacementCharTexts * 100.0) / finalCount;
+            String summary = "windowMs=" + Math.max(1L, now - windowStartedAtMs)
+                    + ", finalCount=" + finalCount
+                    + ", avgTextLength=" + String.format("%.2f", avgLen)
+                    + ", replacementCharTexts=" + replacementCharTexts
+                    + ", replacementRatio=" + String.format("%.2f", replacementRatio) + "%";
+            reset(now);
+            return summary;
+        }
+
+        private void rotateIfNeeded(long now) {
+            if (now - windowStartedAtMs < STT_QUALITY_LOG_INTERVAL_MS) {
+                return;
+            }
+            reset(now);
+        }
+
+        private void reset(long now) {
+            windowStartedAtMs = now;
+            finalCount = 0L;
+            totalTextLength = 0L;
+            replacementCharTexts = 0L;
         }
     }
 }

@@ -49,6 +49,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
     // 로그 과다 방지를 위한 주기(패킷 샘플링 로그)
     private static final long LOG_INTERVAL_PACKETS = 50;
+    // 복호화 품질 요약 로그 주기(ms)
+    private static final long DECRYPT_METRICS_LOG_INTERVAL_MS = 60_000L;
+    // 연속 실패 streak가 이 값 이상이면 burst로 본다.
+    private static final long DECRYPT_BURST_STREAK_THRESHOLD = 5L;
     // 이 시간(ms) 동안 화자 오디오 전달이 없으면 해당 STT 세션을 종료한다.
     private static final long STT_SILENCE_END_MS = 1800L;
     // 무음 종료 감시 주기(ms)
@@ -94,6 +98,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final AtomicBoolean firstUserLogged = new AtomicBoolean(false);
     private final AtomicBoolean webRtcVadUnavailableLogged = new AtomicBoolean(false);
     private final AtomicBoolean webRtcVadEnabledLogged = new AtomicBoolean(false);
+    private final DecryptWindowMetrics decryptWindowMetrics = new DecryptWindowMetrics();
 
     /**
      * 하위 호환 생성자.
@@ -152,6 +157,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         long now = System.currentTimeMillis();
         long encodedCount = encodedPacketCount.incrementAndGet();
         long userId = packet.getUserId();
+        decryptWindowMetrics.recordPacket(now);
 
         // 화자별 통계를 미리 준비한다. UserAudio가 아직 안 오면 user-<id> placeholder를 사용한다.
         SpeakerStats stats = statsByUserId.computeIfAbsent(userId, ignored -> new SpeakerStats("user-" + userId));
@@ -163,6 +169,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         if (!canDecode) {
             // canDecode=false 프레임은 STT 전송 대상에서 제외
             nonDecodableEncodedPackets.incrementAndGet();
+            decryptWindowMetrics.recordFailure(now, DecodeFailureType.CANNOT_DECODE);
             if (firstDecodeFailureReason.get() == null) {
                 try {
                     packet.decode();
@@ -178,8 +185,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     // 일부 프레임은 canDecode=true여도 실제 PCM 추출이 실패할 수 있다.
                     // (예: DAVE decrypt 실패, 순서 꼬임 등)
                     // 이 프레임은 버리고 다음 프레임으로 진행한다.
+                    decryptWindowMetrics.recordFailure(now, DecodeFailureType.EMPTY_PCM);
                     return;
                 }
+                decryptWindowMetrics.recordSuccess();
                 decodedFromEncodedPacketCount.incrementAndGet();
                 decodedFromEncodedByteCount.addAndGet(decodedPcm.length);
                 stats.decodedPcmPacketCount.incrementAndGet();
@@ -209,6 +218,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 }
             } catch (Exception decodeException) {
                 nonDecodableEncodedPackets.incrementAndGet();
+                decryptWindowMetrics.recordFailure(now, DecodeFailureType.EXCEPTION);
                 firstDecodeFailureReason.compareAndSet(null, decodeException.getMessage());
                 long failures = decodeFailureCount.incrementAndGet();
                 // 실시간 수신 루프에서 매 프레임 warn을 찍으면 로그가 폭증하므로 샘플링한다.
@@ -239,6 +249,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     userPacketCount.get(),
                     activeSttSessionsByUserId.size());
         }
+
+        maybeLogDecryptMetrics(now);
     }
 
     /**
@@ -866,6 +878,102 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         private static SpeechEvidence unavailable() {
             return new SpeechEvidence(false, 0f);
+        }
+    }
+
+    private void maybeLogDecryptMetrics(long now) {
+        String summary = decryptWindowMetrics.snapshotAndRotateIfDue(now);
+        if (summary == null) {
+            return;
+        }
+        log.info("[복호화/요약] guildId={}, {}", guildId, summary);
+    }
+
+    private enum DecodeFailureType {
+        CANNOT_DECODE,
+        EMPTY_PCM,
+        EXCEPTION
+    }
+
+    private static final class DecryptWindowMetrics {
+        private long windowStartedAtMs = System.currentTimeMillis();
+        private long totalPackets = 0L;
+        private long totalFailures = 0L;
+        private long cannotDecodeFailures = 0L;
+        private long emptyPcmFailures = 0L;
+        private long exceptionFailures = 0L;
+        private long currentFailureStreak = 0L;
+        private long maxFailureStreak = 0L;
+        private long burstCount = 0L;
+
+        synchronized void recordPacket(long nowMs) {
+            rotateIfNeeded(nowMs);
+            totalPackets++;
+        }
+
+        synchronized void recordSuccess() {
+            if (currentFailureStreak >= DECRYPT_BURST_STREAK_THRESHOLD) {
+                burstCount++;
+            }
+            currentFailureStreak = 0L;
+        }
+
+        synchronized void recordFailure(long nowMs, DecodeFailureType failureType) {
+            rotateIfNeeded(nowMs);
+            totalFailures++;
+            currentFailureStreak++;
+            maxFailureStreak = Math.max(maxFailureStreak, currentFailureStreak);
+            if (failureType == DecodeFailureType.CANNOT_DECODE) {
+                cannotDecodeFailures++;
+                return;
+            }
+            if (failureType == DecodeFailureType.EMPTY_PCM) {
+                emptyPcmFailures++;
+                return;
+            }
+            exceptionFailures++;
+        }
+
+        synchronized String snapshotAndRotateIfDue(long nowMs) {
+            if (nowMs - windowStartedAtMs < DECRYPT_METRICS_LOG_INTERVAL_MS) {
+                return null;
+            }
+            String summary = buildSummary(nowMs);
+            reset(nowMs);
+            return summary;
+        }
+
+        private void rotateIfNeeded(long nowMs) {
+            if (nowMs - windowStartedAtMs < DECRYPT_METRICS_LOG_INTERVAL_MS) {
+                return;
+            }
+            reset(nowMs);
+        }
+
+        private String buildSummary(long nowMs) {
+            long windowMs = Math.max(1L, nowMs - windowStartedAtMs);
+            double failureRate = totalPackets == 0 ? 0.0 : (totalFailures * 100.0) / totalPackets;
+            return "windowMs=" + windowMs
+                    + ", packets=" + totalPackets
+                    + ", failures=" + totalFailures
+                    + ", failureRate=" + String.format("%.2f", failureRate) + "%"
+                    + ", cannotDecode=" + cannotDecodeFailures
+                    + ", emptyPcm=" + emptyPcmFailures
+                    + ", exceptions=" + exceptionFailures
+                    + ", maxFailureStreak=" + maxFailureStreak
+                    + ", burstCount=" + burstCount;
+        }
+
+        private void reset(long nowMs) {
+            windowStartedAtMs = nowMs;
+            totalPackets = 0L;
+            totalFailures = 0L;
+            cannotDecodeFailures = 0L;
+            emptyPcmFailures = 0L;
+            exceptionFailures = 0L;
+            currentFailureStreak = 0L;
+            maxFailureStreak = 0L;
+            burstCount = 0L;
         }
     }
 
