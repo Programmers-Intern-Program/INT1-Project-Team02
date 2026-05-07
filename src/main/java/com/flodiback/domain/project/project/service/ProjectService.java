@@ -1,5 +1,6 @@
 package com.flodiback.domain.project.project.service;
 
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
@@ -38,6 +39,18 @@ public class ProjectService {
                 .build();
         projectRepository.save(project);
 
+        return toResponse(project);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProjectResponse> getAll() {
+        return projectRepository.findAll().stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ProjectResponse getById(Long id) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         return toResponse(project);
     }
 

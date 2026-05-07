@@ -1,5 +1,9 @@
 package com.flodiback.api.project;
 
+import java.util.List;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,5 +27,15 @@ public class ProjectController {
     @PostMapping
     public RsData<ProjectResponse> create(@RequestBody @Valid CreateProjectRequest req) {
         return RsData.of("201-1", "프로젝트가 생성되었습니다.", projectService.create(req));
+    }
+
+    @GetMapping
+    public RsData<List<ProjectResponse>> getAll() {
+        return RsData.of("200-1", "프로젝트 목록 조회 성공.", projectService.getAll());
+    }
+
+    @GetMapping("/{id}")
+    public RsData<ProjectResponse> getById(@PathVariable Long id) {
+        return RsData.of("200-1", "프로젝트 조회 성공.", projectService.getById(id));
     }
 }

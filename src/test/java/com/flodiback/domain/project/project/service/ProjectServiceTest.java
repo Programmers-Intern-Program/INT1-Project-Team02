@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -85,5 +87,56 @@ class ProjectServiceTest {
                 .hasMessage("존재하지 않는 서버입니다.");
 
         verify(projectRepository, never()).save(any());
+    }
+
+    // ─── getAll ───────────────────────────────────────────
+
+    @Test
+    void getAll_프로젝트목록반환() {
+        // given
+        Project p1 = Project.builder().name("프로젝트 A").build();
+        Project p2 = Project.builder().name("프로젝트 B").build();
+        willReturn(List.of(p1, p2)).given(projectRepository).findAll();
+
+        // when
+        List<ProjectResponse> responses = projectService.getAll();
+
+        // then
+        verify(projectRepository).findAll();
+        assertThat(responses).hasSize(2);
+        assertThat(responses.get(0).name()).isEqualTo("프로젝트 A");
+        assertThat(responses.get(1).name()).isEqualTo("프로젝트 B");
+    }
+
+    // ─── getById ──────────────────────────────────────────
+
+    @Test
+    void getById_유효한_id면_프로젝트반환() {
+        // given
+        Project project = Project.builder()
+                .name("플로디 프로젝트")
+                .description("설명")
+                .techStack("Java")
+                .build();
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+
+        // when
+        ProjectResponse response = projectService.getById(1L);
+
+        // then
+        assertThat(response.name()).isEqualTo("플로디 프로젝트");
+        assertThat(response.description()).isEqualTo("설명");
+        assertThat(response.techStack()).isEqualTo("Java");
+    }
+
+    @Test
+    void getById_존재하지않는_id면_예외발생() {
+        // given
+        given(projectRepository.findById(999L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> projectService.getById(999L))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("존재하지 않는 프로젝트입니다.");
     }
 }
