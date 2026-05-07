@@ -114,7 +114,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
             case "project start" -> handleProjectStart(event, channelId);
-            case "meeting start" -> handleMeetingStart(event, channelId);
+            case "meeting start" -> new Thread(() -> handleMeetingStart(event, channelId)).start();
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
                 // 미지원 명령은 조용히 무시
