@@ -43,7 +43,7 @@ class ProjectServiceTest {
     @Test
     void create_serverId없으면_server_null로_프로젝트생성() {
         // given
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", null);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", null, null);
         given(projectRepository.save(any(Project.class))).willAnswer(inv -> inv.getArgument(0));
 
         // when
@@ -63,7 +63,7 @@ class ProjectServiceTest {
         // given
         DiscordServer server =
                 DiscordServer.builder().guildId("guild-123").guildName("플로디 서버").build();
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 1L);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 1L, null);
         given(discordServerRepository.findById(1L)).willReturn(Optional.of(server));
         given(projectRepository.save(any(Project.class))).willAnswer(inv -> inv.getArgument(0));
 
@@ -79,7 +79,7 @@ class ProjectServiceTest {
     @Test
     void create_존재하지않는_serverId면_예외발생() {
         // given
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 999L);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 999L, null);
         given(discordServerRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
