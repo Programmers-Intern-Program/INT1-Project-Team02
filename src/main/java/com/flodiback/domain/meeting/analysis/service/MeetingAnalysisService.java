@@ -1,9 +1,13 @@
 package com.flodiback.domain.meeting.analysis.service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -29,6 +33,7 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,22 +43,15 @@ import lombok.extern.slf4j.Slf4j;
 @Transactional
 public class MeetingAnalysisService {
 
-    private static final String SYSTEM_PROMPT = """
-            당신은 회의 내용을 분석하는 AI 시스템입니다.
-            아래 회의 내용을 분석해서 반드시 다음 JSON 형식으로만 응답하세요.
-            마크다운 코드블록 없이 순수 JSON만 반환하세요.
-            {
-              "summary": "전체 회의 요약",
-              "unresolvedItems": "미결 사항 (없으면 null)",
-              "worklogs": [
-                { "assigneeName": "담당자 이름", "task": "작업 내용", "dueDate": "YYYY-MM-DD" }
-              ],
-              "decisions": [
-                { "content": "결정 내용" }
-              ]
-            }
-            dueDate는 날짜가 있으면 "YYYY-MM-DD" 문자열로, 없으면 따옴표 없는 null로 반환하세요.
-            """;
+    @Value("classpath:prompts/meeting-analysis-system.md")
+    private Resource systemPromptResource;
+
+    private String systemPrompt;
+
+    @PostConstruct
+    private void loadPrompt() throws IOException {
+        this.systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+    }
 
     private final MeetingRepository meetingRepository;
     private final ContextCacheRepository contextCacheRepository;
@@ -133,7 +131,7 @@ public class MeetingAnalysisService {
     }
 
     private AnalysisResult callGlm(String context) {
-        String raw = glmClient.chat(SYSTEM_PROMPT, context);
+        String raw = glmClient.chat(systemPrompt, context);
         String json = raw.strip()
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")
