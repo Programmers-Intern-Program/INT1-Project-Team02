@@ -1,7 +1,7 @@
 # 2026-05-07-153534-meeting-start-context-codex
 
 - 작성자: codex
-- 상태: completed
+- 상태: 완료(읽기 전용)
 - 생성시각(로컬): 2026-05-07 15:35:34
 
 ## Background
