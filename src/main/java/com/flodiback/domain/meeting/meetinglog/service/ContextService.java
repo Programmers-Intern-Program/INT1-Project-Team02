@@ -1,7 +1,10 @@
 package com.flodiback.domain.meeting.meetinglog.service;
 
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,11 +12,16 @@ import org.springframework.transaction.annotation.Transactional;
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContext;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContextProvider;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
+import com.flodiback.domain.meeting.meetinglog.dto.DecisionSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.PastSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.QuestionContext;
 import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
 import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
@@ -53,24 +61,25 @@ public class ContextService {
     private final OpenAiEmbeddingClient embeddingClient;
     private final DecisionEmbeddingService decisionEmbeddingService;
     private final MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
+    private final MeetingStartContextProvider meetingStartContextProvider;
 
     public ContextResponse assemble(Long meetingId, String question) {
         Meeting meeting = meetingRepository
                 .findById(meetingId)
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
 
+        MeetingStartContext startContext = meetingStartContextProvider.getOrCreate(meetingId);
         ShortTermParts shortTerm = resolveShortTerm(meeting);
 
         Project project = meeting.getProject();
         if (project == null) {
-            return ContextResponse.noProject(shortTerm.rollingSummary(), shortTerm.recentUtterances());
+            return ContextResponse.noProject(startContext, shortTerm.rollingSummary(), shortTerm.recentUtterances());
         }
 
-        List<Decision> decisions = resolveDecisions(project.getId(), question);
-        List<MeetingSummary> pastSummaries = resolvePastSummaries(project.getId(), meetingId, question);
+        QuestionContext questionContext = resolveQuestionContext(project.getId(), meetingId, question, startContext);
 
         return ContextResponse.of(
-                project, shortTerm.rollingSummary(), shortTerm.recentUtterances(), decisions, pastSummaries);
+                startContext, shortTerm.rollingSummary(), shortTerm.recentUtterances(), questionContext);
     }
 
     private ShortTermParts resolveShortTerm(Meeting meeting) {
@@ -165,35 +174,68 @@ public class ContextService {
         }
     }
 
-    private List<Decision> resolveDecisions(Long projectId, String question) {
+    private QuestionContext resolveQuestionContext(
+            Long projectId, Long meetingId, String question, MeetingStartContext startContext) {
         if (question == null || question.isBlank()) {
-            return decisionRepository.findByProjectIdOrderByIdAsc(projectId);
+            return QuestionContext.empty();
         }
 
+        String embeddingStr;
         try {
             float[] raw = embeddingClient.embed(question);
-            String embeddingStr = new PGvector(raw).getValue();
-            return decisionRepository.hybridSearch(
-                    projectId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT);
+            embeddingStr = new PGvector(raw).getValue();
         } catch (Exception e) {
-            log.warn("하이브리드 서치 실패, 전체 결정사항으로 폴백 - projectId={}: {}", projectId, e.getMessage());
-            return decisionRepository.findByProjectIdOrderByIdAsc(projectId);
+            log.warn(
+                    "questionContext embedding failed, returning empty context - projectId={}: {}",
+                    projectId,
+                    e.getMessage());
+            return QuestionContext.empty();
+        }
+
+        List<DecisionSummary> decisions = resolveDecisions(projectId, question, embeddingStr, startContext).stream()
+                .map(DecisionSummary::from)
+                .toList();
+        List<PastSummary> pastSummaries =
+                resolvePastSummaries(projectId, meetingId, question, embeddingStr, startContext).stream()
+                        .map(PastSummary::from)
+                        .toList();
+
+        return new QuestionContext(decisions, pastSummaries);
+    }
+
+    private List<Decision> resolveDecisions(
+            Long projectId, String question, String embeddingStr, MeetingStartContext startContext) {
+        try {
+            Set<Long> startDecisionIds = startContext.recentDecisions().stream()
+                    .map(decision -> decision.id())
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toSet());
+            return decisionRepository
+                    .hybridSearch(projectId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT)
+                    .stream()
+                    .filter(decision -> !startDecisionIds.contains(decision.getId()))
+                    .toList();
+        } catch (Exception e) {
+            log.warn("하이브리드 서치 실패, questionContext 결정사항을 비웁니다 - projectId={}: {}", projectId, e.getMessage());
+            return Collections.emptyList();
         }
     }
 
-    private List<MeetingSummary> resolvePastSummaries(Long projectId, Long meetingId, String question) {
-        if (question == null || question.isBlank()) {
-            return meetingSummaryRepository.findLatestPastByProjectId(projectId, meetingId, TOP_K);
-        }
-
+    private List<MeetingSummary> resolvePastSummaries(
+            Long projectId, Long meetingId, String question, String embeddingStr, MeetingStartContext startContext) {
         try {
-            float[] raw = embeddingClient.embed(question);
-            String embeddingStr = new PGvector(raw).getValue();
-            return meetingSummaryRepository.hybridSearch(
-                    projectId, meetingId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT);
+            Set<Long> startSummaryIds = startContext.recentSummaries().stream()
+                    .map(summary -> summary.id())
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toSet());
+            return meetingSummaryRepository
+                    .hybridSearch(projectId, meetingId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT)
+                    .stream()
+                    .filter(summary -> !startSummaryIds.contains(summary.getId()))
+                    .toList();
         } catch (Exception e) {
-            log.warn("회의 요약 하이브리드 서치 실패, 최신 요약으로 폴백 - projectId={}: {}", projectId, e.getMessage());
-            return meetingSummaryRepository.findLatestPastByProjectId(projectId, meetingId, TOP_K);
+            log.warn("회의 요약 하이브리드 서치 실패, questionContext 요약을 비웁니다 - projectId={}: {}", projectId, e.getMessage());
+            return Collections.emptyList();
         }
     }
 

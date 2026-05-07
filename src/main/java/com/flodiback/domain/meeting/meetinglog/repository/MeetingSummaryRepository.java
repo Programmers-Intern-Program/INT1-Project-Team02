@@ -1,6 +1,7 @@
 package com.flodiback.domain.meeting.meetinglog.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -29,6 +30,20 @@ public interface MeetingSummaryRepository extends JpaRepository<MeetingSummary, 
             @Param("projectId") Long projectId,
             @Param("currentMeetingId") Long currentMeetingId,
             @Param("topK") int topK);
+
+    @Query(value = """
+                    SELECT ms.unresolved_items
+                    FROM meeting_summaries ms
+                    JOIN meetings m ON ms.meeting_id = m.id
+                    WHERE m.project_id = :projectId
+                      AND ms.meeting_id <> :currentMeetingId
+                      AND ms.unresolved_items IS NOT NULL
+                      AND btrim(ms.unresolved_items) <> ''
+                    ORDER BY ms.created_at DESC
+                    LIMIT 1
+                    """, nativeQuery = true)
+    Optional<String> findLatestUnresolvedItemsByProjectId(
+            @Param("projectId") Long projectId, @Param("currentMeetingId") Long currentMeetingId);
 
     @Modifying
     @Query(

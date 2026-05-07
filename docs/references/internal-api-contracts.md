@@ -36,6 +36,67 @@ Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
 - `ai_answer`는 호출어가 감지되어 AI 답변이 생성된 경우에만 문자열로 내려갑니다.
 - 호출어가 없거나 AI 답변 생성에 실패하면 `ai_answer`는 `null`입니다.
 
+## `GET /internal/v1/meetings/{meetingId}/context`
+회의 중 AI 답변용 컨텍스트를 조회합니다.
+
+Query:
+- `question` (선택): 질문 기반 추가 검색에 사용할 텍스트입니다. 비어 있으면 `questionContext`는 빈 목록을 반환합니다.
+
+응답 `data`:
+```json
+{
+  "startContext": {
+    "meetingId": 1,
+    "projectId": 10,
+    "projectName": "Flodi",
+    "techStack": "Spring Boot, PostgreSQL",
+    "metadata": null,
+    "recentDecisions": [
+      {
+        "id": 1,
+        "content": "인증 방식은 JWT로 한다.",
+        "decidedAt": "2026-05-07T10:00:00"
+      }
+    ],
+    "recentSummaries": [
+      {
+        "id": 3,
+        "summary": "로그인 기능 담당자를 정했다.",
+        "createdAt": "2026-05-07T10:00:00"
+      }
+    ],
+    "unresolvedItems": "API 응답 형식 미정",
+    "activeWorkLogs": [
+      {
+        "id": 7,
+        "assigneeName": "김철수",
+        "task": "로그인 API 작성",
+        "dueDate": "2026-05-10",
+        "status": "TODO"
+      }
+    ]
+  },
+  "shortTerm": {
+    "rollingSummary": "[흐름 요약]\n- ...",
+    "recentUtterances": [
+      {
+        "speakerName": "김철수",
+        "content": "인증은 JWT로 하죠.",
+        "speechStartedAt": "2026-05-07T10:10:00"
+      }
+    ]
+  },
+  "questionContext": {
+    "decisions": [],
+    "pastSummaries": []
+  }
+}
+```
+
+- `startContext`는 회의 시작 시점의 프로젝트 기억이며 인메모리에서 재사용됩니다.
+- `shortTerm`은 현재 회의의 rolling summary와 미압축 발화 window입니다.
+- `questionContext`는 `question`이 있을 때만 Decision/MeetingSummary hybrid search 결과를 담고, `startContext`와 id 기준으로 중복 제거됩니다.
+
 ## `GET /internal/v1/projects/{id}/context`
 에이전트/봇 워크플로에서 사용할 프로젝트 컨텍스트를 조회합니다.
 

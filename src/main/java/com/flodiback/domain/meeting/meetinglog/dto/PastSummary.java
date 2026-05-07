@@ -4,9 +4,9 @@ import java.time.LocalDateTime;
 
 import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
 
-public record PastSummary(String summary, LocalDateTime createdAt) {
+public record PastSummary(Long id, String summary, LocalDateTime createdAt) {
 
     public static PastSummary from(MeetingSummary meetingSummary) {
-        return new PastSummary(meetingSummary.getSummary(), meetingSummary.getCreatedAt());
+        return new PastSummary(meetingSummary.getId(), meetingSummary.getSummary(), meetingSummary.getCreatedAt());
     }
 }

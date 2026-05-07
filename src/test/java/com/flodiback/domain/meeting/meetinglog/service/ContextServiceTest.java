@@ -3,9 +3,9 @@ package com.flodiback.domain.meeting.meetinglog.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -27,12 +27,16 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.flodiback.domain.decision.decision.entity.Decision;
 import com.flodiback.domain.decision.decision.repository.DecisionRepository;
 import com.flodiback.domain.decision.decision.service.DecisionEmbeddingService;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContext;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContextProvider;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
+import com.flodiback.domain.meeting.meetinglog.dto.DecisionSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.PastSummary;
 import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
 import com.flodiback.domain.meeting.meetinglog.entity.MeetingSummary;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
@@ -78,6 +82,9 @@ class ContextServiceTest {
     @Mock
     private MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
 
+    @Mock
+    private MeetingStartContextProvider meetingStartContextProvider;
+
     @InjectMocks
     private ContextService contextService;
 
@@ -86,67 +93,36 @@ class ContextServiceTest {
         lenient()
                 .when(contextCacheRepository.findTopByMeetingOrderByVersionDesc(any(Meeting.class)))
                 .thenReturn(Optional.empty());
+        lenient()
+                .when(meetingStartContextProvider.getOrCreate(anyLong()))
+                .thenAnswer(invocation -> MeetingStartContext.noProject(invocation.getArgument(0)));
     }
 
-    // ── assemble() ──────────────────────────────────────────────────────────
-
     @Test
-    void assemble_존재하지않는_회의면_ServiceException() {
+    void assemble_throws_whenMeetingDoesNotExist() {
         given(meetingRepository.findById(1L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> contextService.assemble(1L, null)).isInstanceOf(ServiceException.class);
     }
 
     @Test
-    void assemble_프로젝트없는_회의면_shortTerm만_채워진_응답() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
+    void assemble_returnsShortTermAndEmptyQuestionContext_whenProjectDoesNotExist() {
+        Meeting meeting = Meeting.builder().title("standalone").build();
+        ReflectionTestUtils.setField(meeting, "id", 1L);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);
 
+        assertThat(result.startContext().projectId()).isNull();
         assertThat(result.shortTerm()).isNotNull();
-        assertThat(result.longTerm().projectName()).isNull();
-        assertThat(result.longTerm().decisions()).isEmpty();
+        assertThat(result.questionContext().decisions()).isEmpty();
+        assertThat(result.questionContext().pastSummaries()).isEmpty();
     }
 
     @Test
-    void assemble_utterances_id조회후_speechStartedAt_asc_id_asc로_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        Utterance u1 = utterance(meeting, 1L, "Alice", "첫번째", 10, 10);
-        Utterance u2 = utterance(meeting, 2L, "Bob", "두번째", 20, 10);
-        Utterance u3 = utterance(meeting, 3L, "Carol", "세번째", 20, 10);
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(List.of(u2, u3, u1));
-
-        ContextResponse result = contextService.assemble(1L, null);
-
-        List<String> names = result.shortTerm().recentUtterances().stream()
-                .map(us -> us.speakerName())
-                .toList();
-        assertThat(names).containsExactly("Alice", "Bob", "Carol");
-    }
-
-    @Test
-    void assemble_noCache_짧은발화가_많으면_최근20개보다_많이_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 30, 10));
-
-        ContextResponse result = contextService.assemble(1L, null);
-
-        assertThat(result.shortTerm().recentUtterances()).hasSize(30);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-1");
-        assertThat(result.shortTerm().recentUtterances().get(29).content()).isEqualTo("content-30");
-    }
-
-    @Test
-    void assemble_noCache_tokenBudget_초과하면_최근window를_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
+    void assemble_noCache_usesTokenBudgetButKeepsAtLeastTwentyUtterances() {
+        Meeting meeting = Meeting.builder().title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 30, 100));
 
@@ -158,31 +134,24 @@ class ContextServiceTest {
     }
 
     @Test
-    void assemble_noCache_tokenCount_null이면_content기반으로_추정() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
+    void assemble_noCache_returnsMoreThanTwenty_whenTokensFitBudget() {
+        Meeting meeting = Meeting.builder().title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        List<Utterance> utterances = new ArrayList<>();
-        for (long i = 1; i <= 30; i++) {
-            utterances.add(utterance(meeting, i, "speaker-" + i, "x".repeat(400), i, null));
-        }
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances);
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 30, 10));
 
         ContextResponse result = contextService.assemble(1L, null);
 
-        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("x".repeat(400));
+        assertThat(result.shortTerm().recentUtterances()).hasSize(30);
     }
 
     @Test
-    void assemble_latestContextCache_있으면_idWatermark_이후_tokenBudget_window를_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
+    void assemble_latestCache_returnsRollingSummaryAndUtterancesAfterWatermark() {
+        Meeting meeting = Meeting.builder().title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         ContextCache cache = ContextCache.builder()
                 .meeting(meeting)
                 .version(1)
-                .compressedText("이전까지 인증과 배포를 논의했다.")
+                .compressedText("previous rolling summary")
                 .tokenCount(100)
                 .compressedUntilUtteranceId(10L)
                 .build();
@@ -193,162 +162,102 @@ class ContextServiceTest {
 
         ContextResponse result = contextService.assemble(1L, null);
 
-        assertThat(result.shortTerm().rollingSummary()).isEqualTo("이전까지 인증과 배포를 논의했다.");
+        assertThat(result.shortTerm().rollingSummary()).isEqualTo("previous rolling summary");
         assertThat(result.shortTerm().recentUtterances()).hasSize(21);
         assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-11");
-        assertThat(result.shortTerm().recentUtterances().get(20).content()).isEqualTo("content-31");
     }
 
     @Test
-    void assemble_latestContextCache_tokenBudget_초과해도_최소20개를_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
+    void assemble_projectWithBlankQuestion_usesStartContextAndSkipsQuestionRetrieval() {
+        Project project = project(10L, "Flodi", "Java, Spring");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        MeetingStartContext startContext = startContext(1L, 10L);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        ContextCache cache = ContextCache.builder()
-                .meeting(meeting)
-                .version(1)
-                .compressedText("이전까지 인증과 배포를 논의했다.")
-                .tokenCount(100)
-                .compressedUntilUtteranceId(10L)
-                .build();
-        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
-                .willReturn(Optional.of(cache));
-        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 10L))
-                .willReturn(utterances(meeting, 11, 31, 200));
+        given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext);
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);
 
-        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
-        assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
+        assertThat(result.startContext()).isEqualTo(startContext);
+        assertThat(result.questionContext().decisions()).isEmpty();
+        assertThat(result.questionContext().pastSummaries()).isEmpty();
+        verify(decisionRepository, never()).findByProjectIdOrderByIdAsc(10L);
+        verify(meetingSummaryRepository, never()).findLatestPastByProjectId(10L, 1L, 5);
     }
 
     @Test
-    void assemble_프로젝트있으면_longTerm_포함() {
-        Project project = mock(Project.class);
-        given(project.getId()).willReturn(10L);
-        given(project.getName()).willReturn("테스트 프로젝트");
-        given(project.getTechStack()).willReturn("Java, Spring");
-        given(project.getMetadata()).willReturn(null);
-
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(project);
+    void assemble_question_usesHybridSearchAndDedupesStartContextItems() {
+        Project project = project(10L, "Flodi", "Java");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        MeetingStartContext startContext = new MeetingStartContext(
+                1L,
+                10L,
+                "Flodi",
+                "Java",
+                null,
+                List.of(new DecisionSummary(1L, "already in start", null)),
+                List.of(new PastSummary(11L, "already in start summary", null)),
+                null,
+                Collections.emptyList());
+        Decision duplicateDecision = decision(project, meeting, 1L, "already in start");
+        Decision newDecision = decision(project, meeting, 2L, "new related decision");
+        MeetingSummary duplicateSummary = meetingSummary(meeting, 11L, "already in start summary");
+        MeetingSummary newSummary = meetingSummary(meeting, 12L, "new related summary");
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext);
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(Collections.emptyList());
-        given(decisionRepository.findByProjectIdOrderByIdAsc(10L)).willReturn(Collections.emptyList());
-        given(meetingSummaryRepository.findLatestPastByProjectId(10L, 1L, 5)).willReturn(Collections.emptyList());
-
-        ContextResponse result = contextService.assemble(1L, null);
-
-        assertThat(result.longTerm().projectName()).isEqualTo("테스트 프로젝트");
-        assertThat(result.longTerm().techStack()).isEqualTo("Java, Spring");
-    }
-
-    @Test
-    void assemble_question있으면_MeetingSummary_hybridSearch_사용() {
-        Project project = mock(Project.class);
-        given(project.getId()).willReturn(10L);
-        given(project.getName()).willReturn("테스트 프로젝트");
-        given(project.getTechStack()).willReturn("Java, Spring");
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(project);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(Collections.emptyList());
-        given(embeddingClient.embed("이전 결정 뭐였지?")).willReturn(new float[] {0.1f, 0.2f});
+        given(embeddingClient.embed("what did we decide?")).willReturn(new float[] {0.1f, 0.2f});
         given(decisionRepository.hybridSearch(
                         org.mockito.ArgumentMatchers.eq(10L),
                         org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.eq("이전 결정 뭐였지?"),
+                        org.mockito.ArgumentMatchers.eq("what did we decide?"),
                         org.mockito.ArgumentMatchers.eq(5),
                         org.mockito.ArgumentMatchers.eq(0.7),
                         org.mockito.ArgumentMatchers.eq(0.3)))
-                .willReturn(Collections.emptyList());
+                .willReturn(List.of(duplicateDecision, newDecision));
         given(meetingSummaryRepository.hybridSearch(
                         org.mockito.ArgumentMatchers.eq(10L),
                         org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.eq("이전 결정 뭐였지?"),
+                        org.mockito.ArgumentMatchers.eq("what did we decide?"),
                         org.mockito.ArgumentMatchers.eq(5),
                         org.mockito.ArgumentMatchers.eq(0.7),
                         org.mockito.ArgumentMatchers.eq(0.3)))
-                .willReturn(Collections.emptyList());
+                .willReturn(List.of(duplicateSummary, newSummary));
 
-        ContextResponse result = contextService.assemble(1L, "이전 결정 뭐였지?");
+        ContextResponse result = contextService.assemble(1L, "what did we decide?");
 
-        assertThat(result.longTerm().pastSummaries()).isEmpty();
-        verify(meetingSummaryRepository)
-                .hybridSearch(
-                        org.mockito.ArgumentMatchers.eq(10L),
-                        org.mockito.ArgumentMatchers.eq(1L),
-                        org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.eq("이전 결정 뭐였지?"),
-                        org.mockito.ArgumentMatchers.eq(5),
-                        org.mockito.ArgumentMatchers.eq(0.7),
-                        org.mockito.ArgumentMatchers.eq(0.3));
+        assertThat(result.questionContext().decisions())
+                .extracting(DecisionSummary::id)
+                .containsExactly(2L);
+        assertThat(result.questionContext().pastSummaries())
+                .extracting(PastSummary::id)
+                .containsExactly(12L);
+        verify(embeddingClient, times(1)).embed("what did we decide?");
     }
 
     @Test
-    void assemble_summaryHybridSearch_실패하면_latestPastSummaries로_fallback() {
-        Project project = mock(Project.class);
-        given(project.getId()).willReturn(10L);
-        given(project.getName()).willReturn("테스트 프로젝트");
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(project);
+    void assemble_questionSearchFails_returnsEmptyQuestionContextWithoutFallbackLookup() {
+        Project project = project(10L, "Flodi", "Java");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext(1L, 10L));
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(Collections.emptyList());
-        given(embeddingClient.embed("요약 찾아줘")).willReturn(new float[] {0.1f});
-        given(decisionRepository.hybridSearch(
-                        org.mockito.ArgumentMatchers.eq(10L),
-                        org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.eq("요약 찾아줘"),
-                        org.mockito.ArgumentMatchers.eq(5),
-                        org.mockito.ArgumentMatchers.eq(0.7),
-                        org.mockito.ArgumentMatchers.eq(0.3)))
-                .willReturn(Collections.emptyList());
-        given(meetingSummaryRepository.hybridSearch(
-                        org.mockito.ArgumentMatchers.eq(10L),
-                        org.mockito.ArgumentMatchers.eq(1L),
-                        org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.eq("요약 찾아줘"),
-                        org.mockito.ArgumentMatchers.eq(5),
-                        org.mockito.ArgumentMatchers.eq(0.7),
-                        org.mockito.ArgumentMatchers.eq(0.3)))
-                .willThrow(new RuntimeException("search failed"));
-        given(meetingSummaryRepository.findLatestPastByProjectId(10L, 1L, 5)).willReturn(Collections.emptyList());
+        given(embeddingClient.embed("find summary")).willThrow(new RuntimeException("embedding failed"));
 
-        ContextResponse result = contextService.assemble(1L, "요약 찾아줘");
+        ContextResponse result = contextService.assemble(1L, "find summary");
 
-        assertThat(result.longTerm().pastSummaries()).isEmpty();
-        verify(meetingSummaryRepository).findLatestPastByProjectId(10L, 1L, 5);
-    }
-
-    // ── updateContext() ──────────────────────────────────────────────────────
-
-    @Test
-    void updateContext_존재하지않는_프로젝트면_ServiceException() {
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, null);
-        given(projectRepository.findById(99L)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> contextService.updateContext(99L, req)).isInstanceOf(ServiceException.class);
+        assertThat(result.questionContext().decisions()).isEmpty();
+        assertThat(result.questionContext().pastSummaries()).isEmpty();
+        verify(decisionRepository, never()).findByProjectIdOrderByIdAsc(10L);
+        verify(meetingSummaryRepository, never()).findLatestPastByProjectId(10L, 1L, 5);
     }
 
     @Test
-    void updateContext_존재하지않는_회의면_ServiceException() {
-        Project project = mock(Project.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, null);
-        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
-        given(meetingRepository.findById(1L)).willReturn(Optional.empty());
-
-        assertThatThrownBy(() -> contextService.updateContext(1L, req)).isInstanceOf(ServiceException.class);
-    }
-
-    @Test
-    void updateContext_MeetingSummary는_항상_저장() {
-        Project project = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "회의 요약", null, null, null);
-        given(project.getId()).willReturn(1L);
-        given(meeting.getProject()).willReturn(project);
+    void updateContext_savesSummaryAndProcessesEmbedding() {
+        Project project = project(1L, "Flodi", "Java");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
@@ -361,87 +270,77 @@ class ContextServiceTest {
     }
 
     @Test
-    void updateContext_decisions_null이면_Decision_저장안함() {
-        Project project = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, null);
-        given(project.getId()).willReturn(1L);
-        given(meeting.getProject()).willReturn(project);
+    void updateContext_savesDecisionsAndWorkLogs() {
+        Project project = project(1L, "Flodi", "Java");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        UpdateContextRequest req = new UpdateContextRequest(
+                1L,
+                "summary",
+                null,
+                List.of("decision-1", "decision-2"),
+                List.of(
+                        new ActionItemRequest("Alice", "write API", null),
+                        new ActionItemRequest("Bob", "test API", null)));
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
-
-        contextService.updateContext(1L, req);
-
-        verify(decisionRepository, never()).save(any());
-    }
-
-    @Test
-    void updateContext_decisions_2개면_Decision_2번_저장() {
-        Project project = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, List.of("결정1", "결정2"), null);
-        given(project.getId()).willReturn(1L);
-        given(meeting.getProject()).willReturn(project);
-        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(meetingSummaryRepository.save(any(MeetingSummary.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        given(decisionRepository.save(any(Decision.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         contextService.updateContext(1L, req);
 
         verify(decisionRepository, times(2)).save(any(Decision.class));
-    }
-
-    @Test
-    void updateContext_actionItems_null이면_WorkLog_저장안함() {
-        Project project = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, null);
-        given(project.getId()).willReturn(1L);
-        given(meeting.getProject()).willReturn(project);
-        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(meetingSummaryRepository.save(any(MeetingSummary.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
-
-        contextService.updateContext(1L, req);
-
-        verify(workLogRepository, never()).save(any());
-    }
-
-    @Test
-    void updateContext_actionItems_2개면_WorkLog_2번_저장() {
-        Project project = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        ActionItemRequest item1 = new ActionItemRequest("김철수", "API 작성", null);
-        ActionItemRequest item2 = new ActionItemRequest("이영희", "테스트 작성", null);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, List.of(item1, item2));
-        given(project.getId()).willReturn(1L);
-        given(meeting.getProject()).willReturn(project);
-        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(meetingSummaryRepository.save(any(MeetingSummary.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
-
-        contextService.updateContext(1L, req);
-
+        verify(decisionEmbeddingService, times(2)).processEmbedding(any(Decision.class));
         verify(workLogRepository, times(2)).save(any(WorkLog.class));
     }
 
     @Test
-    void updateContext_다른프로젝트의_회의면_ServiceException() {
-        Project requestedProject = mock(Project.class);
-        Project meetingProject = mock(Project.class);
-        Meeting meeting = mock(Meeting.class);
-        UpdateContextRequest req = new UpdateContextRequest(1L, "요약", null, null, null);
-        given(meetingProject.getId()).willReturn(2L);
-        given(meeting.getProject()).willReturn(meetingProject);
+    void updateContext_throws_whenMeetingProjectDoesNotMatchRequestedProject() {
+        Project requestedProject = project(1L, "A", "Java");
+        Project meetingProject = project(2L, "B", "Java");
+        Meeting meeting =
+                Meeting.builder().project(meetingProject).title("meeting").build();
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(requestedProject));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
 
         assertThatThrownBy(() -> contextService.updateContext(1L, req)).isInstanceOf(ServiceException.class);
+    }
+
+    private Project project(Long id, String name, String techStack) {
+        Project project = Project.builder().name(name).techStack(techStack).build();
+        ReflectionTestUtils.setField(project, "id", id);
+        return project;
+    }
+
+    private Decision decision(Project project, Meeting meeting, Long id, String content) {
+        Decision decision = Decision.builder()
+                .project(project)
+                .meeting(meeting)
+                .content(content)
+                .build();
+        ReflectionTestUtils.setField(decision, "id", id);
+        return decision;
+    }
+
+    private MeetingSummary meetingSummary(Meeting meeting, Long id, String summary) {
+        MeetingSummary meetingSummary =
+                MeetingSummary.builder().meeting(meeting).summary(summary).build();
+        ReflectionTestUtils.setField(meetingSummary, "id", id);
+        return meetingSummary;
+    }
+
+    private MeetingStartContext startContext(Long meetingId, Long projectId) {
+        return new MeetingStartContext(
+                meetingId,
+                projectId,
+                "Flodi",
+                "Java",
+                null,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                null,
+                Collections.emptyList());
     }
 
     private List<Utterance> utterances(Meeting meeting, int start, int end, Integer tokenCount) {

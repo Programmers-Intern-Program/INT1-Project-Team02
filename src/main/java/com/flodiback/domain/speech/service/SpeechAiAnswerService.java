@@ -7,10 +7,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import com.flodiback.domain.ai.service.AiChatService;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContext;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
 import com.flodiback.domain.meeting.meetinglog.dto.DecisionSummary;
 import com.flodiback.domain.meeting.meetinglog.dto.PastSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.QuestionContext;
 import com.flodiback.domain.meeting.meetinglog.dto.UtteranceSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.WorkLogSummary;
 import com.flodiback.domain.meeting.meetinglog.service.ContextService;
 
 import lombok.RequiredArgsConstructor;
@@ -91,33 +94,50 @@ public class SpeechAiAnswerService {
         prompt.append("- 회의 컨텍스트에 답이 없거나 무관하면 회의 내용에 없다고 밝힌 뒤 [일반 지식 기반]으로 답변\n");
         prompt.append("- 실제 웹 검색은 하지 않았으므로 웹 검색 출처가 있는 것처럼 표현하지 않음\n\n");
 
-        prompt.append("[프로젝트 정보]\n");
-        prompt.append("프로젝트명: ")
-                .append(valueOrNone(context.longTerm().projectName()))
-                .append("\n");
-        prompt.append("기술 스택: ")
-                .append(valueOrNone(context.longTerm().techStack()))
-                .append("\n");
-        prompt.append("메타데이터: ")
-                .append(valueOrNone(context.longTerm().metadata()))
-                .append("\n\n");
+        prompt.append("[회의 시작 컨텍스트]\n");
+        appendMeetingStartContext(prompt, context.startContext());
 
-        prompt.append("[기존 결정사항]\n");
-        appendDecisions(prompt, context.longTerm().decisions());
-
-        prompt.append("\n[과거 회의 요약]\n");
-        appendPastSummaries(prompt, context.longTerm().pastSummaries());
-
-        prompt.append("\n[현재 회의 요약]\n");
+        prompt.append("\n[현재 회의 컨텍스트]\n");
+        prompt.append("rolling summary:\n");
         appendRollingSummary(prompt, context.shortTerm().rollingSummary());
 
-        prompt.append("\n[최근 회의 대화]\n");
+        prompt.append("\nrecent utterances:\n");
         appendRecentUtterances(prompt, context.shortTerm().recentUtterances());
 
-        // 마지막에 실제 질문을 붙여 GLM이 위 맥락을 근거로 답하도록 합니다.
+        prompt.append("\n[질문 관련 추가 기억]\n");
+        appendQuestionContext(prompt, context.questionContext());
+
         prompt.append("\n[질문]\n").append(question);
 
         return prompt.toString();
+    }
+
+    private void appendMeetingStartContext(StringBuilder prompt, MeetingStartContext context) {
+        prompt.append("projectName: ")
+                .append(valueOrNone(context.projectName()))
+                .append("\n");
+        prompt.append("techStack: ").append(valueOrNone(context.techStack())).append("\n");
+        prompt.append("metadata: ").append(valueOrNone(context.metadata())).append("\n");
+
+        prompt.append("\nrecent decisions:\n");
+        appendDecisions(prompt, context.recentDecisions());
+
+        prompt.append("\nrecent meeting summaries:\n");
+        appendPastSummaries(prompt, context.recentSummaries());
+
+        prompt.append("\nunresolved items:\n");
+        appendTextBlock(prompt, context.unresolvedItems());
+
+        prompt.append("\nactive work logs:\n");
+        appendWorkLogs(prompt, context.activeWorkLogs());
+    }
+
+    private void appendQuestionContext(StringBuilder prompt, QuestionContext context) {
+        prompt.append("related decisions:\n");
+        appendDecisions(prompt, context.decisions());
+
+        prompt.append("\nrelated meeting summaries:\n");
+        appendPastSummaries(prompt, context.pastSummaries());
     }
 
     private void appendDecisions(StringBuilder prompt, List<DecisionSummary> decisions) {
@@ -170,6 +190,31 @@ public class SpeechAiAnswerService {
                 .append(utterance.speakerName())
                 .append("] ")
                 .append(utterance.content())
+                .append("\n"));
+    }
+
+    private void appendTextBlock(StringBuilder prompt, String text) {
+        if (!StringUtils.hasText(text)) {
+            prompt.append("- 없음\n");
+            return;
+        }
+        prompt.append(text.strip()).append("\n");
+    }
+
+    private void appendWorkLogs(StringBuilder prompt, List<WorkLogSummary> workLogs) {
+        if (workLogs == null || workLogs.isEmpty()) {
+            prompt.append("- 없음\n");
+            return;
+        }
+
+        workLogs.forEach(workLog -> prompt.append("- ")
+                .append(workLog.task())
+                .append(" / assignee: ")
+                .append(valueOrNone(workLog.assigneeName()))
+                .append(" / due: ")
+                .append(workLog.dueDate() == null ? "없음" : workLog.dueDate())
+                .append(" / status: ")
+                .append(valueOrNone(workLog.status()))
                 .append("\n"));
     }
 

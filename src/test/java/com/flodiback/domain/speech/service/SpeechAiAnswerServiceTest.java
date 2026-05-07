@@ -16,12 +16,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.flodiback.domain.ai.service.AiChatService;
+import com.flodiback.domain.meeting.meeting.context.MeetingStartContext;
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
 import com.flodiback.domain.meeting.meetinglog.dto.DecisionSummary;
-import com.flodiback.domain.meeting.meetinglog.dto.LongTermContext;
 import com.flodiback.domain.meeting.meetinglog.dto.PastSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.QuestionContext;
 import com.flodiback.domain.meeting.meetinglog.dto.ShortTermContext;
 import com.flodiback.domain.meeting.meetinglog.dto.UtteranceSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.WorkLogSummary;
 import com.flodiback.domain.meeting.meetinglog.service.ContextService;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,31 +40,36 @@ class SpeechAiAnswerServiceTest {
 
     @Test
     void generateAnswerIfCalled_returnsNull_whenWakeWordDoesNotExist() {
-        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "이번 스프린트 목표를 정해봅시다.");
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "이번 스프린트 목표를 정해봅시다");
 
         assertThat(result).isNull();
-        verify(contextService, never()).assemble(1L, "이번 스프린트 목표를 정해봅시다.");
+        verify(contextService, never()).assemble(1L, "이번 스프린트 목표를 정해봅시다");
         verify(aiChatService, never()).generateAnswer(anyString(), anyString());
     }
 
     @Test
     void generateAnswerIfCalled_usesContextAndAiChat_whenWakeWordExists() {
         ContextResponse context = new ContextResponse(
-                new ShortTermContext(null, List.of(new UtteranceSummary("김철수", "인증은 JWT로 하죠.", null))),
-                new LongTermContext(
+                new MeetingStartContext(
+                        1L,
+                        10L,
                         "Flodi",
                         "Spring Boot",
                         null,
-                        List.of(new DecisionSummary("인증 방식은 JWT로 한다.", null)),
-                        List.of(new PastSummary("로그인 기능 담당자를 정했다.", null))));
+                        List.of(new DecisionSummary(1L, "인증 방식은 JWT로 한다.", null)),
+                        List.of(new PastSummary(1L, "로그인 기능 담당자를 정했다.", null)),
+                        "API 응답 형식 미정",
+                        List.of(new WorkLogSummary(1L, "김철수", "로그인 API 작성", null, "TODO"))),
+                new ShortTermContext(null, List.of(new UtteranceSummary("김철수", "인증은 JWT로 하자.", null))),
+                QuestionContext.empty());
 
-        given(contextService.assemble(1L, "인증 방식 뭐로 하기로 했지?")).willReturn(context);
+        given(contextService.assemble(1L, "인증 방식 뭘로 하기로 했지?")).willReturn(context);
         given(aiChatService.generateAnswer(anyString(), anyString())).willReturn("인증 방식은 JWT로 결정했습니다.");
 
-        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "AI야, 인증 방식 뭐로 하기로 했지?");
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "AI야 인증 방식 뭘로 하기로 했지?");
 
         assertThat(result).isEqualTo("인증 방식은 JWT로 결정했습니다.");
-        verify(contextService).assemble(1L, "인증 방식 뭐로 하기로 했지?");
+        verify(contextService).assemble(1L, "인증 방식 뭘로 하기로 했지?");
 
         ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
@@ -78,8 +85,13 @@ class SpeechAiAnswerServiceTest {
                 .contains("Flodi")
                 .contains("인증 방식은 JWT로 한다.")
                 .contains("로그인 기능 담당자를 정했다.")
+                .contains("API 응답 형식 미정")
+                .contains("로그인 API 작성")
+                .contains("[회의 시작 컨텍스트]")
+                .contains("[현재 회의 컨텍스트]")
+                .contains("[질문 관련 추가 기억]")
                 .contains("[질문]")
-                .contains("인증 방식 뭐로 하기로 했지?");
+                .contains("인증 방식 뭘로 하기로 했지?");
     }
 
     @Test
@@ -106,7 +118,7 @@ class SpeechAiAnswerServiceTest {
 
     @Test
     void generateAnswerIfCalled_returnsNull_whenQuestionIsBlank() {
-        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "봇아!");
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "플로디야!");
 
         assertThat(result).isNull();
         verify(contextService, never()).assemble(1L, "");
@@ -119,7 +131,7 @@ class SpeechAiAnswerServiceTest {
         given(contextService.assemble(1L, "토큰 만료 시간 정했어?")).willReturn(context);
         given(aiChatService.generateAnswer(anyString(), anyString())).willThrow(new RuntimeException("GLM error"));
 
-        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "클로드야 토큰 만료 시간 정했어?");
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "플로디야 토큰 만료 시간 정했어?");
 
         assertThat(result).isNull();
         verify(contextService).assemble(1L, "토큰 만료 시간 정했어?");
