@@ -22,9 +22,11 @@ import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
 import net.dv8tion.jda.api.audio.hooks.ConnectionListener;
 import net.dv8tion.jda.api.audio.hooks.ConnectionStatus;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.managers.AudioManager;
@@ -51,7 +53,16 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record ProjectCreationState(ProjectCreationStep step, String name, String description, long createdAt) {}
 
-    private record MeetingConfirmationState(long createdAt) {}
+    private record MeetingStartContext(
+            long guildId,
+            String guildName,
+            AudioChannel voiceChannel,
+            MessageChannel textChannel,
+            AudioManager audioManager,
+            Guild guild,
+            long channelId) {}
+
+    private record MeetingConfirmationState(MeetingStartContext ctx, long createdAt) {}
 
     // 명령어 접두사(예: !)
     private final String prefix;
@@ -114,7 +125,24 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
             case "project start" -> handleProjectStart(event, channelId);
-            case "meeting start" -> new Thread(() -> handleMeetingStart(event, channelId)).start();
+            case "meeting start" -> {
+                Member member = event.getMember();
+                if (member == null
+                        || member.getVoiceState() == null
+                        || member.getVoiceState().getChannel() == null) {
+                    event.getChannel().sendMessage("먼저 음성 채널에 들어가줘.").queue();
+                    return;
+                }
+                MeetingStartContext ctx = new MeetingStartContext(
+                        event.getGuild().getIdLong(),
+                        event.getGuild().getName(),
+                        member.getVoiceState().getChannel(),
+                        event.getChannel(),
+                        event.getGuild().getAudioManager(),
+                        event.getGuild(),
+                        channelId);
+                new Thread(() -> handleMeetingStart(ctx)).start();
+            }
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
                 // 미지원 명령은 조용히 무시
@@ -183,24 +211,16 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
     }
 
-    private void handleMeetingStart(MessageReceivedEvent event, long channelId) {
-        Member member = event.getMember();
-        if (member == null
-                || member.getVoiceState() == null
-                || member.getVoiceState().getChannel() == null) {
-            event.getChannel().sendMessage("먼저 음성 채널에 들어가줘.").queue();
-            return;
-        }
-
-        Long projectId = fetchProjectIdByChannel(channelId);
+    private void handleMeetingStart(MeetingStartContext ctx) {
+        Long projectId = fetchProjectIdByChannel(ctx.channelId());
         if (projectId != null) {
-            startMeeting(event, projectId);
+            startMeeting(ctx, projectId);
             return;
         }
 
         // 채널에 연결된 프로젝트가 없으면 확인 요청
-        pendingMeetingConfirmations.put(channelId, new MeetingConfirmationState(System.currentTimeMillis()));
-        event.getChannel()
+        pendingMeetingConfirmations.put(ctx.channelId(), new MeetingConfirmationState(ctx, System.currentTimeMillis()));
+        ctx.textChannel()
                 .sendMessage("⚠️ 이 채널에 연결된 프로젝트가 없어서 회의가 저장되지 않아요.\n" + "그래도 진행하시겠어요? (yes / no)")
                 .queue();
     }
@@ -220,7 +240,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         pendingMeetingConfirmations.remove(channelId);
 
         if ("yes".equals(input)) {
-            startMeeting(event, null);
+            MeetingStartContext ctx = state.ctx();
+            new Thread(() -> startMeeting(ctx, null)).start();
         } else if ("no".equals(input)) {
             event.getChannel().sendMessage("회의 시작을 취소했습니다.").queue();
         } else {
@@ -281,45 +302,41 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
     }
 
-    private void startMeeting(MessageReceivedEvent event, Long projectId) {
-        Member member = event.getMember();
-        AudioChannel targetChannel = member.getVoiceState().getChannel();
-        long guildId = event.getGuild().getIdLong();
-
-        Long meetingId = createMeeting(guildId, event.getGuild().getName(), projectId);
+    private void startMeeting(MeetingStartContext ctx, Long projectId) {
+        Long meetingId = createMeeting(ctx.guildId(), ctx.guildName(), projectId);
         if (meetingId == null) {
-            event.getChannel().sendMessage("❌ 회의 생성 실패. 서버 로그를 확인해줘.").queue();
+            ctx.textChannel().sendMessage("❌ 회의 생성 실패. 서버 로그를 확인해줘.").queue();
             return;
         }
 
-        AudioManager audioManager = event.getGuild().getAudioManager();
-        PerUserAudioReceiveHandler existing = receiveHandlers.remove(guildId);
+        PerUserAudioReceiveHandler existing = receiveHandlers.remove(ctx.guildId());
         if (existing != null) {
             existing.closeAllSttSessions();
         }
 
         PerUserAudioReceiveHandler handler =
-                new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, meetingId);
-        receiveHandlers.put(guildId, handler);
-        activeMeetingIdByGuild.put(guildId, meetingId);
-        handler.updateCaptionChannel(event.getChannel());
+                new PerUserAudioReceiveHandler(ctx.guildId(), ctx.guild(), sttProvider, meetingId);
+        receiveHandlers.put(ctx.guildId(), handler);
+        activeMeetingIdByGuild.put(ctx.guildId(), meetingId);
+        handler.updateCaptionChannel(ctx.textChannel());
 
-        audioManager.setReceivingHandler(handler);
-        audioManager.setConnectionListener(new LoggingConnectionListener(guildId, targetChannel));
-        audioManager.setAutoReconnect(true);
-        audioManager.setSelfMuted(false);
-        audioManager.setSelfDeafened(false);
-        audioManager.openAudioConnection(targetChannel);
+        ctx.audioManager().setReceivingHandler(handler);
+        ctx.audioManager().setConnectionListener(new LoggingConnectionListener(ctx.guildId(), ctx.voiceChannel()));
+        ctx.audioManager().setAutoReconnect(true);
+        ctx.audioManager().setSelfMuted(false);
+        ctx.audioManager().setSelfDeafened(false);
+        ctx.audioManager().openAudioConnection(ctx.voiceChannel());
 
-        event.getChannel()
-                .sendMessage("🎙️ 회의 시작! 음성 채널 [" + targetChannel.getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
+        ctx.textChannel()
+                .sendMessage(
+                        "🎙️ 회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
                 .queue();
         log.info(
                 "[미팅/시작] guildId={}, meetingId={}, projectId={}, channel={}",
-                guildId,
+                ctx.guildId(),
                 meetingId,
                 projectId,
-                targetChannel.getName());
+                ctx.voiceChannel().getName());
     }
 
     private Long createProject(
