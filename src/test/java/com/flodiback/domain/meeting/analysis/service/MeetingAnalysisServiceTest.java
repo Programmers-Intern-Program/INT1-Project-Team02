@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -60,6 +61,11 @@ class MeetingAnalysisServiceTest {
     private ObjectMapper objectMapper;
 
     private final ObjectMapper realMapper = new ObjectMapper().findAndRegisterModules();
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(service, "systemPrompt", "test-system-prompt");
+    }
 
     @Test
     void analyze_회의없으면_예외발생() {
