@@ -64,14 +64,44 @@ class SpeechAiAnswerServiceTest {
         assertThat(result).isEqualTo("인증 방식은 JWT로 결정했습니다.");
         verify(contextService).assemble(1L, "인증 방식 뭐로 하기로 했지?");
 
+        ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(aiChatService).generateAnswer(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateAnswer(systemPromptCaptor.capture(), userPromptCaptor.capture());
+        assertThat(systemPromptCaptor.getValue())
+                .contains("[회의 기반]")
+                .contains("[일반 지식 기반]")
+                .contains("실제 웹 검색은 하지 않으므로");
         assertThat(userPromptCaptor.getValue())
+                .contains("[답변 규칙]")
+                .contains("[회의 기반]")
+                .contains("[일반 지식 기반]")
                 .contains("Flodi")
                 .contains("인증 방식은 JWT로 한다.")
                 .contains("로그인 기능 담당자를 정했다.")
                 .contains("[질문]")
                 .contains("인증 방식 뭐로 하기로 했지?");
+    }
+
+    @Test
+    void generateAnswerIfCalled_allowsGeneralKnowledgeFallback_whenContextDoesNotContainAnswer() {
+        ContextResponse context = ContextResponse.noProject(null, List.of());
+        given(contextService.assemble(1L, "코끼리 나이는 몇 살이야?")).willReturn(context);
+        given(aiChatService.generateAnswer(anyString(), anyString()))
+                .willReturn("회의 내용에서는 해당 내용을 찾지 못했습니다. [일반 지식 기반] 코끼리는 보통 60~70년 정도 살 수 있습니다.");
+
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "클로드야, 코끼리 나이는 몇 살이야?");
+
+        assertThat(result).isEqualTo("회의 내용에서는 해당 내용을 찾지 못했습니다. [일반 지식 기반] 코끼리는 보통 60~70년 정도 살 수 있습니다.");
+        verify(contextService).assemble(1L, "코끼리 나이는 몇 살이야?");
+
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiChatService).generateAnswer(anyString(), userPromptCaptor.capture());
+        assertThat(userPromptCaptor.getValue())
+                .contains("회의 컨텍스트에 답이 없거나 무관하면")
+                .contains("회의 내용에 없다고 밝힌 뒤")
+                .contains("[일반 지식 기반]")
+                .contains("실제 웹 검색은 하지 않았으므로")
+                .contains("코끼리 나이는 몇 살이야?");
     }
 
     @Test
