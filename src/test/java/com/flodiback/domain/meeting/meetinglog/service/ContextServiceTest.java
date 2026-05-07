@@ -101,7 +101,8 @@ class ContextServiceTest {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(null);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(1L))
+                .willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);
 
@@ -117,19 +118,19 @@ class ContextServiceTest {
         Utterance u3 = mock(Utterance.class);
         given(u1.getSpeakerName()).willReturn("Alice");
         given(u1.getContent()).willReturn("첫번째");
-        given(u1.getSpokenAt()).willReturn(null);
+        given(u1.getSpeechStartedAt()).willReturn(null);
         given(u2.getSpeakerName()).willReturn("Bob");
         given(u2.getContent()).willReturn("두번째");
-        given(u2.getSpokenAt()).willReturn(null);
+        given(u2.getSpeechStartedAt()).willReturn(null);
         given(u3.getSpeakerName()).willReturn("Carol");
         given(u3.getContent()).willReturn("세번째");
-        given(u3.getSpokenAt()).willReturn(null);
+        given(u3.getSpeechStartedAt()).willReturn(null);
 
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(null);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         // DB는 DESC(최신→과거) 순으로 반환: [Carol, Bob, Alice]
-        given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L))
+        given(utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(1L))
                 .willReturn(new ArrayList<>(List.of(u3, u2, u1)));
 
         ContextResponse result = contextService.assemble(1L, null);
@@ -142,17 +143,17 @@ class ContextServiceTest {
     }
 
     @Test
-    void assemble_latestContextCache_있으면_rollingSummary와_cache이후_최신20개를_반환() {
+    void assemble_latestContextCache_있으면_idWatermark_이후_최신20개를_반환() {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(null);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        LocalDateTime cacheUntil = LocalDateTime.of(2026, 5, 4, 10, 0);
         ContextCache cache = ContextCache.builder()
                 .meeting(meeting)
                 .version(1)
                 .compressedText("이전까지 인증과 배포를 논의했다.")
-                .startSequenceNo(1L)
-                .endSequenceNo(10L)
                 .tokenCount(100)
+                .compressedUntilUtteranceId(10L)
                 .build();
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.of(cache));
@@ -163,56 +164,15 @@ class ContextServiceTest {
                     .speakerName("speaker-" + i)
                     .speakerDiscordId("discord-" + i)
                     .content("content-" + i)
-                    .sequenceNo(i)
+                    .speechStartedAt(cacheUntil.plusSeconds(i))
                     .build());
         }
-        given(utteranceRepository.findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(meeting, 10L))
+        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 10L))
                 .willReturn(utterances);
 
         ContextResponse result = contextService.assemble(1L, null);
 
         assertThat(result.shortTerm().rollingSummary()).isEqualTo("이전까지 인증과 배포를 논의했다.");
-        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
-        assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
-    }
-
-    @Test
-    void assemble_latestContextCache_createdAtWatermark_있으면_createdAt이후_tail을_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        LocalDateTime compressedUntil = LocalDateTime.of(2026, 5, 4, 11, 59, 0);
-        ContextCache cache = ContextCache.builder()
-                .meeting(meeting)
-                .version(2)
-                .compressedText("created-at summary")
-                .startSequenceNo(1L)
-                .endSequenceNo(10L)
-                .tokenCount(100)
-                .compressedUntilCreatedAt(compressedUntil)
-                .build();
-        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
-                .willReturn(Optional.of(cache));
-        List<Utterance> utterances = new ArrayList<>();
-        for (long i = 11; i <= 31; i++) {
-            utterances.add(Utterance.builder()
-                    .meeting(meeting)
-                    .speakerName("speaker-" + i)
-                    .speakerDiscordId("discord-" + i)
-                    .content("content-" + i)
-                    .spokenAt(LocalDateTime.of(2026, 5, 4, 10, 0).plusSeconds(i))
-                    .sequenceNo(i)
-                    .createdAt(compressedUntil.plusSeconds(i))
-                    .build());
-        }
-        given(utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
-                        meeting, compressedUntil))
-                .willReturn(utterances);
-
-        ContextResponse result = contextService.assemble(1L, null);
-
-        assertThat(result.shortTerm().rollingSummary()).isEqualTo("created-at summary");
         assertThat(result.shortTerm().recentUtterances()).hasSize(20);
         assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
         assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
@@ -229,7 +189,8 @@ class ContextServiceTest {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(project);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(1L))
+                .willReturn(Collections.emptyList());
         given(decisionRepository.findByProjectIdOrderByIdAsc(10L)).willReturn(Collections.emptyList());
         given(meetingSummaryRepository.findLatestPastByProjectId(10L, 1L, 5)).willReturn(Collections.emptyList());
 
@@ -248,7 +209,8 @@ class ContextServiceTest {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(project);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(1L))
+                .willReturn(Collections.emptyList());
         given(embeddingClient.embed("이전 결정 뭐였지?")).willReturn(new float[] {0.1f, 0.2f});
         given(decisionRepository.hybridSearch(
                         org.mockito.ArgumentMatchers.eq(10L),
@@ -290,7 +252,8 @@ class ContextServiceTest {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(project);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(1L)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(1L))
+                .willReturn(Collections.emptyList());
         given(embeddingClient.embed("요약 찾아줘")).willReturn(new float[] {0.1f});
         given(decisionRepository.hybridSearch(
                         org.mockito.ArgumentMatchers.eq(10L),

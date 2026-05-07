@@ -20,5 +20,8 @@ public record InternalSpeechRequest(
         // STT가 변환한 발화 텍스트입니다.
         @NotBlank String text,
 
-        // Discord 봇이 발화를 감지한 시각입니다.
-        @NotNull LocalDateTime timestamp) {}
+        // 발화 시작 시각 (봇 STT startMs, Unix epoch 변환).
+        @JsonProperty("speech_started_at") @NotNull LocalDateTime speechStartedAt,
+
+        // 발화 종료 시각 (봇 STT endMs, Unix epoch 변환).
+        @JsonProperty("speech_ended_at") LocalDateTime speechEndedAt) {}

@@ -47,15 +47,12 @@ class SpeechPersistenceServiceTest {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getId()).willReturn(1L);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.countByMeeting(meeting)).willReturn(0L);
 
         Utterance savedUtterance = mock(Utterance.class);
         given(savedUtterance.getId()).willReturn(100L);
         given(utteranceRepository.save(any(Utterance.class))).willReturn(savedUtterance);
 
-        InternalSpeechRequest request = request("12345678901234567890");
-
-        SavedSpeechResult result = speechPersistenceService.saveUtterance(request);
+        SavedSpeechResult result = speechPersistenceService.saveUtterance(request("12345678901234567890"));
 
         assertThat(result.utteranceId()).isEqualTo(100L);
         assertThat(result.meetingId()).isEqualTo(1L);
@@ -67,16 +64,14 @@ class SpeechPersistenceServiceTest {
         assertThat(utterance.getSpeakerDiscordId()).isEqualTo("discord-1");
         assertThat(utterance.getSpeakerName()).isEqualTo("김철수");
         assertThat(utterance.getContent()).isEqualTo("12345678901234567890");
-        assertThat(utterance.getSpokenAt()).isEqualTo(LocalDateTime.of(2026, 5, 3, 10, 0));
-        assertThat(utterance.getSequenceNo()).isEqualTo(1L);
+        assertThat(utterance.getSpeechStartedAt()).isEqualTo(LocalDateTime.of(2026, 5, 3, 10, 0));
+        assertThat(utterance.getSpeechEndedAt()).isEqualTo(LocalDateTime.of(2026, 5, 3, 10, 0, 5));
         assertThat(utterance.getTokenCount()).isEqualTo(5);
 
         ArgumentCaptor<UtteranceSavedEvent> eventCaptor = ArgumentCaptor.forClass(UtteranceSavedEvent.class);
         verify(eventPublisher).publishEvent(eventCaptor.capture());
         assertThat(eventCaptor.getValue().meetingId()).isEqualTo(1L);
         assertThat(eventCaptor.getValue().utteranceId()).isEqualTo(100L);
-        assertThat(eventCaptor.getValue().sequenceNo()).isEqualTo(1L);
-        assertThat(eventCaptor.getValue().tokenCount()).isEqualTo(5);
     }
 
     @Test
@@ -107,6 +102,12 @@ class SpeechPersistenceServiceTest {
     }
 
     private InternalSpeechRequest request(String text) {
-        return new InternalSpeechRequest(1L, "discord-1", "김철수", text, LocalDateTime.of(2026, 5, 3, 10, 0));
+        return new InternalSpeechRequest(
+                1L,
+                "discord-1",
+                "김철수",
+                text,
+                LocalDateTime.of(2026, 5, 3, 10, 0),
+                LocalDateTime.of(2026, 5, 3, 10, 0, 5));
     }
 }

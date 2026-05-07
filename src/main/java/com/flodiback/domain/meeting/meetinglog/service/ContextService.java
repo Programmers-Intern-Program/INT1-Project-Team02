@@ -1,6 +1,7 @@
 package com.flodiback.domain.meeting.meetinglog.service;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -76,22 +77,17 @@ public class ContextService {
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         if (latestCache == null) {
-            List<Utterance> recentUtterances = utteranceRepository.findTop20ByMeetingIdOrderBySpokenAtDesc(meetingId);
+            List<Utterance> recentUtterances =
+                    utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meetingId);
             Collections.reverse(recentUtterances);
             return new ShortTermParts(null, recentUtterances);
         }
 
-        List<Utterance> utterancesAfterCache;
-        if (latestCache.getCompressedUntilCreatedAt() != null) {
-            utterancesAfterCache =
-                    utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpokenAtAscSequenceNoAscIdAsc(
-                            meeting, latestCache.getCompressedUntilCreatedAt());
-        } else {
-            utterancesAfterCache = utteranceRepository.findByMeetingAndSequenceNoGreaterThanOrderBySequenceNoAsc(
-                    meeting, latestCache.getEndSequenceNo());
-        }
+        List<Utterance> utterancesAfterCache = utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
+                meeting, latestCache.getCompressedUntilUtteranceId());
         return new ShortTermParts(
-                latestCache.getCompressedText(), takeLatest(utterancesAfterCache, RECENT_UTTERANCE_LIMIT));
+                latestCache.getCompressedText(),
+                sortForPrompt(takeLatest(utterancesAfterCache, RECENT_UTTERANCE_LIMIT)));
     }
 
     private List<Utterance> takeLatest(List<Utterance> utterances, int limit) {
@@ -99,6 +95,14 @@ public class ContextService {
             return utterances;
         }
         return utterances.subList(utterances.size() - limit, utterances.size());
+    }
+
+    private List<Utterance> sortForPrompt(List<Utterance> utterances) {
+        return utterances.stream()
+                .sorted(Comparator.comparing(
+                                Utterance::getSpeechStartedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Utterance::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
     }
 
     @Transactional

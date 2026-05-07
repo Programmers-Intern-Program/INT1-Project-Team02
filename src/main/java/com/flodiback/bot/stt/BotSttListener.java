@@ -4,7 +4,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -105,13 +107,16 @@ public class BotSttListener implements SttListener {
 
         try {
             // Spring이 관리하는 ObjectMapper가 아니므로 LocalDateTime 직렬화 설정이 없다.
-            // 그래서 내부 API 계약에 맞는 JSON을 직접 만들고 timestamp는 ISO 문자열로 넣는다.
+            // 그래서 내부 API 계약에 맞는 JSON을 직접 만들고 시각은 ISO 문자열로 넣는다.
             ObjectNode body = objectMapper.createObjectNode();
             body.put("meeting_id", meetingId);
             body.put("speaker_discord_id", speakerDiscordId);
             body.put("speaker_name", speakerName);
             body.put("text", text);
-            body.put("timestamp", LocalDateTime.now().toString());
+            body.put(
+                    "speech_started_at",
+                    epochMsToLocalDateTime(result.startMs()).toString());
+            body.put("speech_ended_at", epochMsToLocalDateTime(result.endMs()).toString());
             String json = objectMapper.writeValueAsString(body);
 
             // 보안상 원문(text)은 로그에 남기지 않고 길이만 남긴다.
@@ -374,6 +379,10 @@ public class BotSttListener implements SttListener {
                     wakeWordDetected,
                     parseException);
         }
+    }
+
+    private static LocalDateTime epochMsToLocalDateTime(long epochMs) {
+        return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDateTime();
     }
 
     private boolean containsWakeWord(String text) {

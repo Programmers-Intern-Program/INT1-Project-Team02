@@ -41,10 +41,10 @@
 - `speaker_discord_id` VARCHAR(50) NOT NULL
 - `speaker_type` VARCHAR(20) NOT NULL
 - `content` TEXT NOT NULL
-- `spoken_at` TIMESTAMP NOT NULL
-- `sequence_no` BIGINT NOT NULL
+- `speech_started_at` TIMESTAMP NOT NULL — 봇 STT startMs 기반 실제 발화 시작 시각
+- `speech_ended_at` TIMESTAMP NULL — 봇 STT endMs 기반 실제 발화 종료 시각
 - `token_count` INT NULL
-- `created_at` TIMESTAMP NOT NULL
+- `created_at` TIMESTAMP NOT NULL — 서버 삽입 시각
 
 ### `meeting_summaries`
 - `id` BIGINT PK
@@ -64,9 +64,7 @@
 - `version` INT NOT NULL
 - `compressed_text` TEXT NOT NULL
 - `token_count` INT NOT NULL
-- `start_sequence_no` BIGINT NOT NULL
-- `end_sequence_no` BIGINT NOT NULL
-- `compressed_until_created_at` TIMESTAMP NULL
+- `compressed_until_utterance_id` BIGINT NULL — 압축된 발화 중 max(utterance.id), 다음 압축 후보 조회 기준
 - `created_at` TIMESTAMP NOT NULL
 
 ### `decisions`
