@@ -6,12 +6,14 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
+import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
 import com.flodiback.domain.project.project.service.ProjectService;
 import com.flodiback.global.rsData.RsData;
 
@@ -38,6 +40,11 @@ public class ProjectController {
     @GetMapping("/{id}")
     public RsData<ProjectResponse> getById(@PathVariable Long id) {
         return RsData.of("200-1", "프로젝트 조회 성공.", projectService.getById(id));
+    }
+
+    @PutMapping("/{id}")
+    public RsData<ProjectResponse> update(@PathVariable Long id, @RequestBody UpdateProjectRequest req) {
+        return RsData.of("200-1", "프로젝트가 수정되었습니다.", projectService.update(id, req));
     }
 
     @DeleteMapping("/{id}")

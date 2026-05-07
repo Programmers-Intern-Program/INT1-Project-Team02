@@ -51,6 +51,12 @@ public class Project {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    public void update(String name, String description, String techStack) {
+        if (name != null) this.name = name;
+        if (description != null) this.description = description;
+        if (techStack != null) this.techStack = techStack;
+    }
+
     public void softDelete() {
         this.deletedAt = LocalDateTime.now();
     }

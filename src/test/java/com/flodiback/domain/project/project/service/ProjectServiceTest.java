@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
+import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
@@ -136,6 +137,39 @@ class ProjectServiceTest {
 
         // when & then
         assertThatThrownBy(() -> projectService.getById(999L))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("존재하지 않는 프로젝트입니다.");
+    }
+
+    // ─── update ───────────────────────────────────────────
+
+    @Test
+    void update_유효한_id면_프로젝트수정() {
+        // given
+        Project project = Project.builder()
+                .name("기존 이름")
+                .description("기존 설명")
+                .techStack("Java")
+                .build();
+        UpdateProjectRequest req = new UpdateProjectRequest("새 이름", "새 설명", "Kotlin");
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+
+        // when
+        ProjectResponse response = projectService.update(1L, req);
+
+        // then
+        assertThat(response.name()).isEqualTo("새 이름");
+        assertThat(response.description()).isEqualTo("새 설명");
+        assertThat(response.techStack()).isEqualTo("Kotlin");
+    }
+
+    @Test
+    void update_존재하지않는_id면_예외발생() {
+        // given
+        given(projectRepository.findById(999L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> projectService.update(999L, new UpdateProjectRequest("이름", null, null)))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 프로젝트입니다.");
     }

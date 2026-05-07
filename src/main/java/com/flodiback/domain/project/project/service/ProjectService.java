@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
+import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
@@ -51,6 +52,13 @@ public class ProjectService {
     public ProjectResponse getById(Long id) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        return toResponse(project);
+    }
+
+    public ProjectResponse update(Long id, UpdateProjectRequest req) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        project.update(req.name(), req.description(), req.techStack());
         return toResponse(project);
     }
 
