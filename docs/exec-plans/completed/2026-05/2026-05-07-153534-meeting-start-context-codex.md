@@ -1,8 +1,8 @@
 # 2026-05-07-153534-meeting-start-context-codex
 
-- owner: codex
-- status: completed
-- created-at: 2026-05-07 15:35:34
+- 작성자: codex
+- 상태: completed
+- 생성시각(로컬): 2026-05-07 15:35:34
 
 ## Background
 
