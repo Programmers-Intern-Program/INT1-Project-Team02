@@ -37,7 +37,7 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
     private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
-    private static final long CAPTION_DEBOUNCE_MS = 300L;
+    private static final long CAPTION_DEBOUNCE_MS = 150L;
     private static final int CAPTION_MIN_CHARS = 2;
     private static final long STT_QUALITY_LOG_INTERVAL_MS = 60_000L;
     private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
@@ -262,13 +262,23 @@ public class BotSttListener implements SttListener {
                 return;
             }
             String messageContent = desiredCaptionContent.get();
+            long startedAt = System.nanoTime();
             captionChannel
                     .sendMessage(messageContent)
                     .queue(
                             message -> {
+                                long elapsedMs = elapsedMillis(startedAt);
                                 liveCaptionMessageId.set(message.getId());
                                 renderedCaptionContent.set(messageContent);
                                 captionMessageCreating.set(false);
+                                log.info(
+                                        "[STT/자막메시지생성완료] speakerId={}, meetingId={}, messageId={}, elapsedMs={}, textLength={}, final={}",
+                                        speakerDiscordId,
+                                        meetingId,
+                                        message.getId(),
+                                        elapsedMs,
+                                        messageContent.length(),
+                                        desiredCaptionFinal.get());
                                 if (!messageContent.equals(desiredCaptionContent.get())) {
                                     syncLiveCaption();
                                     return;
@@ -278,11 +288,13 @@ public class BotSttListener implements SttListener {
                                 }
                             },
                             throwable -> {
+                                long elapsedMs = elapsedMillis(startedAt);
                                 captionMessageCreating.set(false);
                                 log.warn(
-                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}",
+                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}, elapsedMs={}",
                                         speakerDiscordId,
                                         meetingId,
+                                        elapsedMs,
                                         throwable);
                             });
             return;
@@ -297,12 +309,22 @@ public class BotSttListener implements SttListener {
             return;
         }
 
+        long startedAt = System.nanoTime();
         captionChannel
                 .editMessageById(messageId, desiredContent)
                 .queue(
                         message -> {
+                            long elapsedMs = elapsedMillis(startedAt);
                             renderedCaptionContent.set(desiredContent);
                             captionEditInFlight.set(false);
+                            log.info(
+                                    "[STT/자막메시지수정완료] speakerId={}, meetingId={}, messageId={}, elapsedMs={}, textLength={}, final={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    elapsedMs,
+                                    desiredContent.length(),
+                                    desiredCaptionFinal.get());
                             if (!desiredContent.equals(desiredCaptionContent.get())) {
                                 syncLiveCaption();
                                 return;
@@ -312,14 +334,20 @@ public class BotSttListener implements SttListener {
                             }
                         },
                         throwable -> {
+                            long elapsedMs = elapsedMillis(startedAt);
                             captionEditInFlight.set(false);
                             log.warn(
-                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}",
+                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}, elapsedMs={}",
                                     speakerDiscordId,
                                     meetingId,
                                     messageId,
+                                    elapsedMs,
                                     throwable);
                         });
+    }
+
+    private long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 
     private String formatCaption(String text, boolean isFinal) {
