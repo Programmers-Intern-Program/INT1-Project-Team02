@@ -38,22 +38,32 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
  * - 화자별 오디오 수신 통계 수집
  * - 화자별 STT 세션 start/send/end 관리
  * - 무음 구간 기준으로 발화 세션 종료(commit)
+ *
+ * <p>동작 요약:
+ * - Discord Opus 패킷을 디코딩한 PCM 기준으로 로컬 VAD를 수행한다.
+ * - 로컬 VAD가 발화 시작을 확정하면 세션을 열고 프리롤 + 현재 프레임을 전송한다.
+ * - 마지막 전송 시각 기준으로 무음이 이어지면 세션을 종료한다.
  */
 public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final Logger log = LoggerFactory.getLogger(PerUserAudioReceiveHandler.class);
 
-    // 로그 과다 방지를 위한 주기
+    // 로그 과다 방지를 위한 주기(패킷 샘플링 로그)
     private static final long LOG_INTERVAL_PACKETS = 50;
-    // 이 시간(ms) 동안 화자 오디오가 없으면 해당 STT 세션을 종료한다.
+    // 이 시간(ms) 동안 화자 오디오 전달이 없으면 해당 STT 세션을 종료한다.
     private static final long STT_SILENCE_END_MS = 1800L;
     // 무음 종료 감시 주기(ms)
     private static final long STT_SILENCE_WATCH_INTERVAL_MS = 250L;
+    // RMS 폴백 모드에서 사용하는 발화 시작/유지 임계값
     private static final int VAD_START_RMS_THRESHOLD = 600;
     private static final int VAD_END_RMS_THRESHOLD = 500;
+    // WebRTC VAD 점수 임계값(시작은 엄격, 유지는 완화)
     private static final float VAD_START_PROB_THRESHOLD = 0.62f;
     private static final float VAD_END_PROB_THRESHOLD = 0.45f;
+    // 발화 시작 확정을 위한 연속 프레임 수
     private static final int VAD_MIN_CONSECUTIVE_SPEECH_FRAMES = 3;
+    // 발화 시작 시 앞부분 유실을 줄이기 위한 프리롤 길이(ms)
     private static final int VAD_PREROLL_MS = 400;
+    // 초기 환경 적응(노이즈/발화 RMS 수집) 기간
     private static final long VAD_CALIBRATION_WINDOW_MS = 180_000L;
 
     private final long guildId;
@@ -64,8 +74,9 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final Guild guild;
     private volatile MessageChannel captionChannel;
 
-    // 사용자 ID별 누적 통계
+    // 사용자 ID별 누적 통계(튜닝/디버깅 지표)
     private final Map<Long, SpeakerStats> statsByUserId = new ConcurrentHashMap<>();
+    // 사용자별 WebRTC VAD 인스턴스(네이티브 리소스)
     private final Map<Long, VAD> webRtcVadByUserId = new ConcurrentHashMap<>();
     // 사용자 ID별 활성 STT 세션
     private final Map<Long, ActiveSttSession> activeSttSessionsByUserId = new ConcurrentHashMap<>();
@@ -83,7 +94,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     // 첫 디코딩 실패 사유를 기록해 원인 파악에 사용
     private final AtomicReference<String> firstDecodeFailureReason = new AtomicReference<>();
 
-    // 첫 수신 순간 강조 로그 플래그
+    // 첫 수신 순간 강조 로그 플래그(연결 확인용)
     private final AtomicBoolean firstEncodedLogged = new AtomicBoolean(false);
     private final AtomicBoolean firstUserLogged = new AtomicBoolean(false);
     private final AtomicBoolean webRtcVadUnavailableLogged = new AtomicBoolean(false);
@@ -112,6 +123,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         this.meetingId = meetingId;
         this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
         this.sttIoExecutor = Executors.newSingleThreadScheduledExecutor(new SttIoThreadFactory(guildId));
+        // 무음 종료 감시 스케줄러 시작
         this.silenceWatcher.scheduleAtFixedRate(
                 this::endInactiveSttSessionsOnSchedule,
                 STT_SILENCE_WATCH_INTERVAL_MS,
@@ -120,6 +132,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     }
 
     public void updateCaptionChannel(MessageChannel captionChannel) {
+        // 런타임 중 자막 채널이 바뀔 수 있으므로 setter로 주입
         this.captionChannel = captionChannel;
     }
 
@@ -158,6 +171,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         boolean canDecode = packet.canDecode();
         if (!canDecode) {
+            // canDecode=false 프레임은 STT 전송 대상에서 제외
             nonDecodableEncodedPackets.incrementAndGet();
             if (firstDecodeFailureReason.get() == null) {
                 try {
@@ -182,13 +196,17 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 stats.decodedPcmByteCount.addAndGet(decodedPcm.length);
 
                 int rms = calculateRms(decodedPcm);
+                // 초기 몇 분은 환경에 맞춰 RMS 임계값을 보정한다.
                 maybeCalibrateVad(now, rms);
+                // 발화 판단 입력값(WebRTC 우선, 실패 시 RMS 폴백)
                 SpeechEvidence speechEvidence = detectSpeechEvidence(userId, decodedPcm, rms);
 
+                // 로컬 VAD 상태머신 결과를 기준으로 전송 여부를 결정한다.
                 ForwardDecision decision = evaluateVad(userId, stats, decodedPcm, speechEvidence, now);
                 if (decision == ForwardDecision.DROP) {
                     // no-op
                 } else if (decision == ForwardDecision.START_WITH_PREROLL) {
+                    // 시작 확정 시 세션을 만들고 프리롤 프레임을 먼저 전송한다.
                     ActiveSttSession session = getOrCreateSttSession(userId, stats.userName, now);
                     if (session == null) {
                         // no-op
@@ -199,6 +217,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                         }
                     }
                 } else {
+                    // 이미 발화 중이면 현재 프레임을 바로 전송한다.
                     forwardPcmToStt(userId, stats.userName, decodedPcm, now);
                 }
             } catch (Exception decodeException) {
@@ -283,14 +302,17 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * 길드 음성 세션을 명시적으로 종료할 때(예: !leave) 모든 STT 세션을 end(commit)한다.
      */
     public void closeAllSttSessions() {
+        // 명시 종료 시에는 감시 스레드부터 멈춘다.
         silenceWatcher.shutdownNow();
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
             ActiveSttSession activeSession = entry.getValue();
             if (activeSttSessionsByUserId.remove(userId, activeSession)) {
+                // map에서 제거 성공한 세션만 종료해 중복 종료를 막는다.
                 endSessionNow(activeSession, "manual_close_all");
             }
         }
+        // STT I/O 전용 스레드도 함께 정리
         sttIoExecutor.shutdownNow();
         for (VAD vad : webRtcVadByUserId.values()) {
             closeVadQuietly(vad);
@@ -386,6 +408,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * - 그리고 sendPcm 호출
      */
     private void forwardPcmToStt(long userId, String speakerName, byte[] decodedPcm, long now) {
+        // 세션이 없으면 생성(start), 있으면 재사용
         ActiveSttSession session = getOrCreateSttSession(userId, speakerName, now);
         if (session == null) {
             return;
@@ -406,6 +429,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         String speakerId = Long.toString(userId);
         String normalizedSpeakerName = resolveSpeakerName(userId, speakerName);
+        // 세션 ID는 길드/화자/시작시각 조합으로 생성한다.
         String sessionId = guildId + ":" + speakerId + ":" + now;
 
         ActiveSttSession created = new ActiveSttSession(sessionId, speakerId, now);
@@ -445,6 +469,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private void sendToActiveSession(ActiveSttSession session, long userId, byte[] pcm, long now) {
         ActiveSttSession current = activeSttSessionsByUserId.get(userId);
         if (current != session) {
+            // 세션 교체 경합으로 늦게 도착한 작업이면 무시
             return;
         }
         session.lastAudioAtMs.set(now);
@@ -455,6 +480,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         try {
             sttIoExecutor.execute(() -> {
                 try {
+                    // 세션 시작 시 화자/미팅 컨텍스트를 리스너에 고정한다.
                     BotSttListener listener =
                             new BotSttListener(meetingId, session.speakerId, speakerName, captionChannel);
                     sttProvider.startSession(session.sessionId, session.speakerId, listener);
@@ -493,6 +519,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         try {
             sttIoExecutor.execute(() -> {
                 try {
+                    // 네트워크 I/O를 수신 스레드와 분리해 패킷 처리 지연을 줄인다.
                     sendToActiveSession(session, userId, pcm, now);
                 } catch (Exception sendException) {
                     log.warn(
@@ -523,12 +550,14 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         for (Map.Entry<Long, ActiveSttSession> entry : activeSttSessionsByUserId.entrySet()) {
             Long userId = entry.getKey();
             ActiveSttSession session = entry.getValue();
+            // 마지막 오디오 전송 시각 기준으로 무음 지속 시간을 계산
             long silenceMs = now - session.lastAudioAtMs.get();
             if (silenceMs < STT_SILENCE_END_MS) {
                 continue;
             }
 
             if (activeSttSessionsByUserId.remove(userId, session)) {
+                // 종료 경합 방지를 위해 제거 성공한 세션만 종료한다.
                 safelyEndSession(session, "silence_" + silenceMs + "ms");
             }
         }
@@ -543,6 +572,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
     private void submitSttEndTask(ActiveSttSession session, String reason) {
         try {
+            // 종료도 비동기 큐에서 처리해 수신 루프를 막지 않는다.
             sttIoExecutor.execute(() -> endSessionNow(session, reason));
         } catch (Exception queueException) {
             log.warn(
@@ -597,6 +627,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 return null;
             }
 
+            // Opus decode 결과(short[])를 byte[] PCM으로 변환
             return OpusPacket.getAudioData(decodedShort, 1.0);
         } catch (Exception exception) {
             // 상위에서 카운트/로그 처리하도록 그대로 전달
@@ -606,6 +637,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
     private ForwardDecision evaluateVad(
             long userId, SpeakerStats stats, byte[] decodedPcm, SpeechEvidence speechEvidence, long now) {
+        // 시작 직전 유실 방지를 위해 프리롤 버퍼는 항상 유지
         stats.preRollBuffer.add(decodedPcm);
         ActiveSttSession activeSession = activeSttSessionsByUserId.get(userId);
         long startThreshold = vadStartThreshold.get();
@@ -619,10 +651,13 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         if (activeSession != null) {
             if (continueSpeech) {
+                // 이미 발화 중이며 유지 조건 충족 -> 전달 계속
                 stats.vadState = VadState.IN_SPEECH;
                 stats.trailingSilenceStartedAtMs.set(0L);
                 return ForwardDecision.FORWARD;
             }
+            // 발화 중이지만 유지 조건 미달 -> 무음 상태로 전이
+            // (실제 세션 종료는 silence watcher가 담당)
             if (stats.trailingSilenceStartedAtMs.get() == 0L) {
                 stats.trailingSilenceStartedAtMs.set(now);
             }
@@ -634,11 +669,13 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             long consecutive = stats.consecutiveSpeechFrames.incrementAndGet();
             stats.vadState = VadState.SPEECH_CANDIDATE;
             if (consecutive >= VAD_MIN_CONSECUTIVE_SPEECH_FRAMES) {
+                // 연속 프레임 조건 충족 시 발화 시작 확정
                 stats.consecutiveSpeechFrames.set(0L);
                 stats.trailingSilenceStartedAtMs.set(0L);
                 stats.vadState = VadState.IN_SPEECH;
                 return ForwardDecision.START_WITH_PREROLL;
             }
+            // 시작 후보 상태에선 아직 전송하지 않고 다음 프레임을 본다.
             return ForwardDecision.DROP;
         }
 
@@ -660,6 +697,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         long sumSquare = 0L;
         int sampleCount = 0;
         // JDA 출력은 16-bit signed big-endian PCM
+        // 샘플 제곱평균의 제곱근(RMS)을 계산해 음량 지표로 사용한다.
         for (int index = 0; index + 1 < decodedPcm.length; index += 2) {
             int high = decodedPcm[index] & 0xFF;
             int low = decodedPcm[index + 1] & 0xFF;
@@ -678,6 +716,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private SpeechEvidence detectSpeechEvidence(long userId, byte[] decodedPcm, int rms) {
         VAD vad = getOrCreateWebRtcVad(userId);
         if (vad == null) {
+            // 네이티브 VAD 불가 환경에서는 RMS 기반 판단으로 폴백
             return SpeechEvidence.rmsOnly(rms);
         }
 
@@ -689,6 +728,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
                 log.warn("[VAD/WEBRTC폴백] guildId={}, reason={}", guildId, exception.toString());
             }
+            // 반복 실패를 피하기 위해 해당 인스턴스를 폐기하고 RMS로 전환
             webRtcVadByUserId.remove(userId, vad);
             closeVadQuietly(vad);
             return SpeechEvidence.rmsOnly(rms);
@@ -713,6 +753,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
                 log.warn("[VAD/WEBRTC사용불가] guildId={}, fallback=RMS, reason={}", guildId, throwable.toString());
             }
+            // 로드 실패/네이티브 예외는 즉시 폴백
             return null;
         }
     }
@@ -730,6 +771,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             return new byte[0];
         }
 
+        // WebRTC VAD 입력 포맷:
+        // - mono
+        // - little-endian pcm16
+        // 현재 입력(JDA)은 48kHz stereo big-endian 이므로 변환이 필요하다.
         int stereoFrameSize = 4;
         int frameCount = stereoBe.length / stereoFrameSize;
         byte[] monoLe = new byte[frameCount * 2];
@@ -752,6 +797,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
 
         long startedAt = calibrationStartedAtMs.get();
         if (now - startedAt <= VAD_CALIBRATION_WINDOW_MS) {
+            // 초기 학습 구간:
+            // 임시 threshold 기준으로 noise/speech 샘플을 분리해 수집한다.
             synchronized (calibrationNoiseRms) {
                 if (rms >= vadStartThreshold.get()) {
                     calibrationSpeechRms.add(rms);
@@ -788,6 +835,9 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         int speechP50 = speech.length == 0 ? 0 : percentile(speech, 50);
         int speechP95 = speech.length == 0 ? 0 : percentile(speech, 95);
 
+        // 경험식:
+        // - start는 noise 대비 더 엄격하게(1.8x)
+        // - end는 완화해(1.2x) 짧은 틈에서 발화가 끊기지 않게 한다.
         long suggestedStart = Math.max(VAD_START_RMS_THRESHOLD, Math.round(noiseP95 * 1.8));
         long suggestedEnd = Math.max(VAD_END_RMS_THRESHOLD, Math.round(noiseP95 * 1.2));
         if (suggestedEnd >= suggestedStart) {
@@ -822,6 +872,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static class ActiveSttSession {
         private final String sessionId;
         private final String speakerId;
+        // 마지막으로 STT에 PCM을 보낸 시각.
+        // silence watcher가 이 값을 기준으로 종료 시점을 계산한다.
         private final AtomicLong lastAudioAtMs = new AtomicLong();
 
         private ActiveSttSession(String sessionId, String speakerId, long startedAtMs) {
@@ -870,11 +922,14 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         private final AtomicLong encodedByteCount = new AtomicLong();
         private final AtomicLong decodedPcmPacketCount = new AtomicLong();
         private final AtomicLong decodedPcmByteCount = new AtomicLong();
+        // 발화 시작 확정 전 연속 프레임 카운터
         private final AtomicLong consecutiveSpeechFrames = new AtomicLong();
+        // 로컬 VAD 상태 관측용(종료 판단은 silence watcher가 최종 담당)
         private final AtomicLong trailingSilenceStartedAtMs = new AtomicLong();
         private final AtomicLong packetCount = new AtomicLong();
         private final AtomicLong byteCount = new AtomicLong();
         private final AtomicLong lastSeenAtMs = new AtomicLong();
+        // 발화 시작 시 프리롤(앞부분) 전송을 위한 버퍼
         private final PreRollBuffer preRollBuffer = new PreRollBuffer(VAD_PREROLL_MS);
         private volatile VadState vadState = VadState.IDLE;
 
@@ -939,6 +994,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
 
         private void add(byte[] frame) {
+            // 원본 배열은 이후 재사용될 수 있으므로 복사본을 저장한다.
             byte[] copy = Arrays.copyOf(frame, frame.length);
             frames.addLast(copy);
             totalBytes += copy.length;
@@ -950,6 +1006,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
 
         private List<byte[]> drain() {
+            // 시작 시점에만 한 번 꺼내 전송하고 즉시 비운다.
             List<byte[]> drained = new ArrayList<>(frames);
             frames.clear();
             totalBytes = 0;
