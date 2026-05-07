@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.type.SqlTypes;
 
@@ -17,6 +18,7 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "projects")
+@SQLDelete(sql = "UPDATE projects SET deleted_at = now() WHERE id = ?")
 @SQLRestriction("deleted_at IS NULL")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
