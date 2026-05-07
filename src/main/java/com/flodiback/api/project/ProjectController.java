@@ -42,6 +42,15 @@ public class ProjectController {
         return RsData.of("200-1", "프로젝트 조회 성공.", projectService.getById(id));
     }
 
+    @GetMapping("/channel/{channelId}")
+    public RsData<ProjectResponse> getByChannelId(@PathVariable String channelId) {
+        ProjectResponse response = projectService.getByChannelId(channelId);
+        if (response == null) {
+            return RsData.of("404-1", "채널에 연결된 프로젝트가 없습니다.", null);
+        }
+        return RsData.of("200-1", "프로젝트 조회 성공.", response);
+    }
+
     @PutMapping("/{id}")
     public RsData<ProjectResponse> update(@PathVariable Long id, @RequestBody UpdateProjectRequest req) {
         return RsData.of("200-1", "프로젝트가 수정되었습니다.", projectService.update(id, req));

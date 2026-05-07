@@ -57,6 +57,14 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
+    public ProjectResponse getByChannelId(String channelId) {
+        return projectRepository
+                .findByChannelId(channelId)
+                .map(this::toResponse)
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectResponse getById(Long id) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
