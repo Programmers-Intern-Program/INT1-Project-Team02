@@ -1,7 +1,5 @@
 package com.flodiback.domain.meeting.meetinglog.rolling;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -27,12 +25,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RollingSummaryPersistenceService {
 
-    private static final int GRACE_SECONDS = 10;
-
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
     private final ContextCacheRepository contextCacheRepository;
-    private final Clock clock;
 
     @Transactional(readOnly = true)
     public Optional<CompressionCandidate> prepareCompression(Long meetingId) {
@@ -45,7 +40,7 @@ public class RollingSummaryPersistenceService {
         ContextCache latestCache = contextCacheRepository
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
-        List<Utterance> uncompressed = findCompressibleUtterances(meeting, latestCache, safeUntil());
+        List<Utterance> uncompressed = findCompressibleUtterances(meeting, latestCache);
         long tokenSum = sumTokens(uncompressed);
         if (tokenSum < RollingSummaryService.TOKEN_THRESHOLD) {
             return Optional.empty();
@@ -57,16 +52,16 @@ public class RollingSummaryPersistenceService {
         }
 
         List<Utterance> toCompress = uncompressed.subList(0, compressEndExclusive);
-        LocalDateTime compressedUntilCreatedAt = toCompress.stream()
-                .map(Utterance::getCreatedAt)
-                .max(LocalDateTime::compareTo)
-                .orElse(null);
+        Long compressedUntilUtteranceId = toCompress.stream()
+                .map(Utterance::getId)
+                .max(Long::compareTo)
+                .orElseThrow(() -> new IllegalStateException("Compressible utterance id must not be null."));
 
         return Optional.of(new CompressionCandidate(
                 meetingId,
                 latestCache != null ? latestCache.getVersion() : null,
-                latestCache != null ? latestCache.getCompressedUntilCreatedAt() : null,
-                compressedUntilCreatedAt,
+                latestCache != null ? latestCache.getCompressedUntilUtteranceId() : null,
+                compressedUntilUtteranceId,
                 buildUserPrompt(
                         latestCache != null ? latestCache.getCompressedText() : null, sortForPrompt(toCompress))));
     }
@@ -85,9 +80,9 @@ public class RollingSummaryPersistenceService {
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         Integer actualVersion = latestCache != null ? latestCache.getVersion() : null;
-        LocalDateTime actualWatermark = latestCache != null ? latestCache.getCompressedUntilCreatedAt() : null;
+        Long actualWatermark = latestCache != null ? latestCache.getCompressedUntilUtteranceId() : null;
         if (!Objects.equals(candidate.expectedVersion(), actualVersion)
-                || !Objects.equals(candidate.expectedCompressedUntilCreatedAt(), actualWatermark)) {
+                || !Objects.equals(candidate.expectedCompressedUntilUtteranceId(), actualWatermark)) {
             log.info("Rolling summary save skipped because cache advanced. meetingId={}", candidate.meetingId());
             return;
         }
@@ -97,7 +92,7 @@ public class RollingSummaryPersistenceService {
                 .version(candidate.nextVersion())
                 .compressedText(compressedText.strip())
                 .tokenCount(TokenEstimator.estimate(compressedText))
-                .compressedUntilCreatedAt(candidate.compressedUntilCreatedAt())
+                .compressedUntilUtteranceId(candidate.compressedUntilUtteranceId())
                 .build());
     }
 
@@ -111,17 +106,16 @@ public class RollingSummaryPersistenceService {
         ContextCache latestCache = contextCacheRepository
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
-        return sumTokens(findCompressibleUtterances(meeting, latestCache, safeUntil()));
+        return sumTokens(findCompressibleUtterances(meeting, latestCache));
     }
 
-    private List<Utterance> findCompressibleUtterances(
-            Meeting meeting, ContextCache latestCache, LocalDateTime safeUntil) {
+    private List<Utterance> findCompressibleUtterances(Meeting meeting, ContextCache latestCache) {
         if (latestCache == null) {
-            return utteranceRepository.findByMeetingAndCreatedAtLessThanEqualOrderByCreatedAtAsc(meeting, safeUntil);
+            return utteranceRepository.findByMeetingOrderByIdAsc(meeting);
         }
 
-        return utteranceRepository.findByMeetingAndCreatedAtGreaterThanAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
-                meeting, latestCache.getCompressedUntilCreatedAt(), safeUntil);
+        return utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
+                meeting, latestCache.getCompressedUntilUtteranceId());
     }
 
     private long sumTokens(List<Utterance> utterances) {
@@ -136,10 +130,6 @@ public class RollingSummaryPersistenceService {
                                 Utterance::getSpeechStartedAt, Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(Utterance::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
-    }
-
-    private LocalDateTime safeUntil() {
-        return LocalDateTime.now(clock).minusSeconds(GRACE_SECONDS);
     }
 
     private String buildUserPrompt(String previousSummary, List<Utterance> utterances) {
@@ -159,8 +149,8 @@ public class RollingSummaryPersistenceService {
     record CompressionCandidate(
             Long meetingId,
             Integer expectedVersion,
-            LocalDateTime expectedCompressedUntilCreatedAt,
-            LocalDateTime compressedUntilCreatedAt,
+            Long expectedCompressedUntilUtteranceId,
+            Long compressedUntilUtteranceId,
             String userPrompt) {
 
         int nextVersion() {

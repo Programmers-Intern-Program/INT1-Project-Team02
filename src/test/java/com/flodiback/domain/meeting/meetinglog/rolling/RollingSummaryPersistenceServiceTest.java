@@ -6,10 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
@@ -31,10 +29,7 @@ import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 @ExtendWith(MockitoExtension.class)
 class RollingSummaryPersistenceServiceTest {
 
-    private static final Clock FIXED_CLOCK =
-            Clock.fixed(Instant.parse("2026-05-04T03:00:00Z"), ZoneId.of("Asia/Seoul"));
-    private static final LocalDateTime SAFE_UNTIL = LocalDateTime.of(2026, 5, 4, 11, 59, 50);
-    private static final LocalDateTime OLD_CREATED_AT = LocalDateTime.of(2026, 5, 4, 11, 59, 0);
+    private static final LocalDateTime SAME_CREATED_AT = LocalDateTime.of(2026, 5, 4, 11, 59, 0);
 
     @Mock
     private MeetingRepository meetingRepository;
@@ -49,8 +44,7 @@ class RollingSummaryPersistenceServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RollingSummaryPersistenceService(
-                meetingRepository, utteranceRepository, contextCacheRepository, FIXED_CLOCK);
+        service = new RollingSummaryPersistenceService(meetingRepository, utteranceRepository, contextCacheRepository);
     }
 
     @Test
@@ -59,7 +53,7 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
-        given(utteranceRepository.findByMeetingAndCreatedAtLessThanEqualOrderByCreatedAtAsc(meeting, SAFE_UNTIL))
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting))
                 .willReturn(List.of(utterance(meeting, 1L, 100), utterance(meeting, 2L, 200)));
 
         assertThat(service.prepareCompression(1L)).isEmpty();
@@ -71,8 +65,7 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
-        given(utteranceRepository.findByMeetingAndCreatedAtLessThanEqualOrderByCreatedAtAsc(meeting, SAFE_UNTIL))
-                .willReturn(utterances(meeting, 1, 20, OLD_CREATED_AT, 200));
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 20, 200));
 
         assertThat(service.prepareCompression(1L)).isEmpty();
     }
@@ -83,44 +76,68 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
-        given(utteranceRepository.findByMeetingAndCreatedAtLessThanEqualOrderByCreatedAtAsc(meeting, SAFE_UNTIL))
-                .willReturn(utterances(meeting, 1, 31, OLD_CREATED_AT, 100));
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 31, 100));
 
         RollingSummaryPersistenceService.CompressionCandidate candidate =
                 service.prepareCompression(1L).orElseThrow();
 
         assertThat(candidate.expectedVersion()).isNull();
-        assertThat(candidate.expectedCompressedUntilCreatedAt()).isNull();
-        assertThat(candidate.compressedUntilCreatedAt()).isEqualTo(OLD_CREATED_AT.plusSeconds(11));
+        assertThat(candidate.expectedCompressedUntilUtteranceId()).isNull();
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(11L);
         assertThat(candidate.userPrompt()).contains("content-1").doesNotContain("content-31");
         assertThat(candidate.nextVersion()).isEqualTo(1);
     }
 
     @Test
-    void prepareCompression_usesPreviousSummaryAndWatermark() {
+    void prepareCompression_usesPreviousSummaryAndIdWatermark() {
         Meeting meeting = meeting();
         ContextCache latest = ContextCache.builder()
                 .meeting(meeting)
                 .version(3)
                 .compressedText("previous summary")
                 .tokenCount(30)
-                .compressedUntilCreatedAt(OLD_CREATED_AT)
+                .compressedUntilUtteranceId(5L)
                 .build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.of(latest));
-        given(utteranceRepository.findByMeetingAndCreatedAtGreaterThanAndCreatedAtLessThanEqualOrderByCreatedAtAsc(
-                        meeting, OLD_CREATED_AT, SAFE_UNTIL))
-                .willReturn(utterances(meeting, 6, 36, OLD_CREATED_AT.plusSeconds(1), 100));
+        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 5L))
+                .willReturn(utterances(meeting, 6, 36, 100));
 
         RollingSummaryPersistenceService.CompressionCandidate candidate =
                 service.prepareCompression(1L).orElseThrow();
 
         assertThat(candidate.expectedVersion()).isEqualTo(3);
-        assertThat(candidate.expectedCompressedUntilCreatedAt()).isEqualTo(OLD_CREATED_AT);
-        assertThat(candidate.compressedUntilCreatedAt()).isEqualTo(OLD_CREATED_AT.plusSeconds(12));
+        assertThat(candidate.expectedCompressedUntilUtteranceId()).isEqualTo(5L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(16L);
         assertThat(candidate.userPrompt()).contains("previous summary");
         assertThat(candidate.nextVersion()).isEqualTo(4);
+    }
+
+    @Test
+    void prepareCompression_sameCreatedAtUtterances_areNotLostWithIdWatermark() {
+        Meeting meeting = meeting();
+        ContextCache latest = ContextCache.builder()
+                .meeting(meeting)
+                .version(1)
+                .compressedText("previous summary")
+                .tokenCount(10)
+                .compressedUntilUtteranceId(2L)
+                .build();
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
+                .willReturn(Optional.of(latest));
+        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 2L))
+                .willReturn(utterances(meeting, 3, 33, 100));
+
+        RollingSummaryPersistenceService.CompressionCandidate candidate =
+                service.prepareCompression(1L).orElseThrow();
+
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(13L);
+        assertThat(candidate.userPrompt())
+                .contains("content-3")
+                .contains("content-13")
+                .doesNotContain("content-33");
     }
 
     @Test
@@ -131,7 +148,7 @@ class RollingSummaryPersistenceServiceTest {
                 .version(1)
                 .compressedText("already saved")
                 .tokenCount(10)
-                .compressedUntilCreatedAt(OLD_CREATED_AT)
+                .compressedUntilUtteranceId(20L)
                 .build();
         given(meetingRepository.findByIdForUpdate(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
@@ -156,41 +173,38 @@ class RollingSummaryPersistenceServiceTest {
         ContextCache saved = cacheCaptor.getValue();
         assertThat(saved.getVersion()).isEqualTo(1);
         assertThat(saved.getCompressedText()).isEqualTo("summary");
-        assertThat(saved.getCompressedUntilCreatedAt()).isEqualTo(OLD_CREATED_AT.plusSeconds(11));
+        assertThat(saved.getCompressedUntilUtteranceId()).isEqualTo(11L);
     }
 
     private RollingSummaryPersistenceService.CompressionCandidate candidate(
-            Integer expectedVersion, LocalDateTime expectedWatermark) {
+            Integer expectedVersion, Long expectedWatermark) {
         return new RollingSummaryPersistenceService.CompressionCandidate(
-                1L, expectedVersion, expectedWatermark, OLD_CREATED_AT.plusSeconds(11), "prompt");
+                1L, expectedVersion, expectedWatermark, 11L, "prompt");
     }
 
     private Meeting meeting() {
         return Meeting.builder().title("meeting").build();
     }
 
-    private List<Utterance> utterances(
-            Meeting meeting, int start, int end, LocalDateTime createdAtStart, int tokenCount) {
+    private List<Utterance> utterances(Meeting meeting, int start, int end, int tokenCount) {
         List<Utterance> utterances = new ArrayList<>();
         for (long i = start; i <= end; i++) {
-            utterances.add(utterance(meeting, i, tokenCount, createdAtStart.plusSeconds(i - start + 1)));
+            utterances.add(utterance(meeting, i, tokenCount));
         }
         return utterances;
     }
 
-    private Utterance utterance(Meeting meeting, Long index, Integer tokenCount) {
-        return utterance(meeting, index, tokenCount, OLD_CREATED_AT.plusSeconds(index));
-    }
-
-    private Utterance utterance(Meeting meeting, Long index, Integer tokenCount, LocalDateTime createdAt) {
-        return Utterance.builder()
+    private Utterance utterance(Meeting meeting, Long id, Integer tokenCount) {
+        Utterance utterance = Utterance.builder()
                 .meeting(meeting)
                 .speakerName("speaker")
                 .speakerDiscordId("discord")
-                .content("content-" + index)
-                .speechStartedAt(LocalDateTime.of(2026, 5, 4, 10, 0).plusSeconds(index))
+                .content("content-" + id)
+                .speechStartedAt(LocalDateTime.of(2026, 5, 4, 10, 0).plusSeconds(id))
                 .tokenCount(tokenCount)
-                .createdAt(createdAt)
+                .createdAt(SAME_CREATED_AT)
                 .build();
+        ReflectionTestUtils.setField(utterance, "id", id);
+        return utterance;
     }
 }

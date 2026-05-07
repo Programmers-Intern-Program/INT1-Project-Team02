@@ -143,7 +143,7 @@ class ContextServiceTest {
     }
 
     @Test
-    void assemble_latestContextCache_있으면_rollingSummary와_cache이후_최신20개를_반환() {
+    void assemble_latestContextCache_있으면_idWatermark_이후_최신20개를_반환() {
         Meeting meeting = mock(Meeting.class);
         given(meeting.getProject()).willReturn(null);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
@@ -153,7 +153,7 @@ class ContextServiceTest {
                 .version(1)
                 .compressedText("이전까지 인증과 배포를 논의했다.")
                 .tokenCount(100)
-                .compressedUntilCreatedAt(cacheUntil)
+                .compressedUntilUtteranceId(10L)
                 .build();
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.of(cache));
@@ -167,51 +167,12 @@ class ContextServiceTest {
                     .speechStartedAt(cacheUntil.plusSeconds(i))
                     .build());
         }
-        given(utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpeechStartedAtAscIdAsc(
-                        meeting, cacheUntil))
+        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 10L))
                 .willReturn(utterances);
 
         ContextResponse result = contextService.assemble(1L, null);
 
         assertThat(result.shortTerm().rollingSummary()).isEqualTo("이전까지 인증과 배포를 논의했다.");
-        assertThat(result.shortTerm().recentUtterances()).hasSize(20);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
-        assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");
-    }
-
-    @Test
-    void assemble_latestContextCache_createdAtWatermark_있으면_createdAt이후_tail을_반환() {
-        Meeting meeting = mock(Meeting.class);
-        given(meeting.getProject()).willReturn(null);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        LocalDateTime compressedUntil = LocalDateTime.of(2026, 5, 4, 11, 59, 0);
-        ContextCache cache = ContextCache.builder()
-                .meeting(meeting)
-                .version(2)
-                .compressedText("created-at summary")
-                .tokenCount(100)
-                .compressedUntilCreatedAt(compressedUntil)
-                .build();
-        given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
-                .willReturn(Optional.of(cache));
-        List<Utterance> utterances = new ArrayList<>();
-        for (long i = 11; i <= 31; i++) {
-            utterances.add(Utterance.builder()
-                    .meeting(meeting)
-                    .speakerName("speaker-" + i)
-                    .speakerDiscordId("discord-" + i)
-                    .content("content-" + i)
-                    .speechStartedAt(LocalDateTime.of(2026, 5, 4, 10, 0).plusSeconds(i))
-                    .createdAt(compressedUntil.plusSeconds(i))
-                    .build());
-        }
-        given(utteranceRepository.findByMeetingAndCreatedAtGreaterThanOrderBySpeechStartedAtAscIdAsc(
-                        meeting, compressedUntil))
-                .willReturn(utterances);
-
-        ContextResponse result = contextService.assemble(1L, null);
-
-        assertThat(result.shortTerm().rollingSummary()).isEqualTo("created-at summary");
         assertThat(result.shortTerm().recentUtterances()).hasSize(20);
         assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-12");
         assertThat(result.shortTerm().recentUtterances().get(19).content()).isEqualTo("content-31");

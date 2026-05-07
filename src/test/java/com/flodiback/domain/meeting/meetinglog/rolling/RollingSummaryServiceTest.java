@@ -7,7 +7,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.lang.reflect.Method;
-import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -87,7 +86,6 @@ class RollingSummaryServiceTest {
     }
 
     private RollingSummaryPersistenceService.CompressionCandidate candidate() {
-        return new RollingSummaryPersistenceService.CompressionCandidate(
-                1L, null, null, LocalDateTime.of(2026, 5, 4, 11, 59, 11), "prompt");
+        return new RollingSummaryPersistenceService.CompressionCandidate(1L, null, null, 11L, "prompt");
     }
 }

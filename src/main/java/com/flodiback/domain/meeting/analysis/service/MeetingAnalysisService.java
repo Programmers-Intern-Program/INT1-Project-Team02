@@ -1,5 +1,6 @@
 package com.flodiback.domain.meeting.analysis.service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -31,7 +32,7 @@ import lombok.RequiredArgsConstructor;
 public class MeetingAnalysisService {
 
     private static final String SYSTEM_PROMPT = """
-            당신은 회의 내용을 분석하는 어시스턴트입니다.
+            당신은 회의 내용을 분석하는 AI 시스템입니다.
             아래 회의 내용을 분석해서 반드시 다음 JSON 형식으로만 응답하세요.
             마크다운 코드블록 없이 순수 JSON만 반환하세요.
             {
@@ -55,7 +56,6 @@ public class MeetingAnalysisService {
     private final ObjectMapper objectMapper;
 
     public void analyze(Long meetingId) {
-        // 1. 회의 조회
         Meeting meeting =
                 meetingRepository.findById(meetingId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
         Project project = meeting.getProject();
@@ -63,13 +63,9 @@ public class MeetingAnalysisService {
             throw new ServiceException("400-1", "회의에 연결된 프로젝트가 없습니다.");
         }
 
-        // 2. 컨텍스트 구성
         String context = buildContext(meeting);
-
-        // 3. GLM 호출 및 응답 파싱
         AnalysisResult result = callGlm(context);
 
-        // 4. 분석 결과를 통합 컨텍스트 저장 경로로 전달
         contextService.updateContext(project.getId(), toUpdateContextRequest(meeting.getId(), result));
     }
 
@@ -89,27 +85,37 @@ public class MeetingAnalysisService {
     }
 
     private String buildContext(Meeting meeting) {
-        List<ContextCache> caches = contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting);
-        List<Utterance> utterances = utteranceRepository.findByMeetingOrderBySpeechStartedAtAsc(meeting);
+        ContextCache latestCache = contextCacheRepository
+                .findTopByMeetingOrderByVersionDesc(meeting)
+                .orElse(null);
+        List<Utterance> utterances = latestCache == null
+                ? utteranceRepository.findByMeetingOrderByIdAsc(meeting)
+                : utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
+                        meeting, latestCache.getCompressedUntilUtteranceId());
 
         StringBuilder sb = new StringBuilder();
-
-        if (!caches.isEmpty()) {
-            sb.append("[이전 대화 요약]\n");
-            caches.forEach(cache -> sb.append(cache.getCompressedText()).append("\n"));
-            sb.append("\n");
+        if (latestCache != null) {
+            sb.append("[현재 회의 rolling summary]\n");
+            sb.append(latestCache.getCompressedText()).append("\n\n");
         }
 
-        sb.append("[회의 대화 내용]\n");
-        utterances.forEach(u -> sb.append(String.format("%s: %s\n", u.getSpeakerName(), u.getContent())));
+        sb.append(latestCache != null ? "[rolling summary에 아직 반영되지 않은 발화]\n" : "[회의 전체 내용]\n");
+        sortForPrompt(utterances)
+                .forEach(u -> sb.append(String.format("%s: %s\n", u.getSpeakerName(), u.getContent())));
 
         return sb.toString();
     }
 
+    private List<Utterance> sortForPrompt(List<Utterance> utterances) {
+        return utterances.stream()
+                .sorted(Comparator.comparing(
+                                Utterance::getSpeechStartedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Utterance::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
     private AnalysisResult callGlm(String context) {
         String raw = glmClient.chat(SYSTEM_PROMPT, context);
-
-        // GLM이 마크다운 코드블록으로 감쌀 경우 제거
         String json = raw.strip()
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")
