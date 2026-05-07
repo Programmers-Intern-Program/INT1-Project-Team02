@@ -112,11 +112,11 @@ dependencies {
     // JDA: Discord Gateway/REST 클라이언트 기본 SDK
     implementation("net.dv8tion:JDA:6.4.1")
     // jdave-api: DAVE(E2EE) Java 인터롭 레이어
-    implementation("club.minnced:jdave-api:0.1.7")
+    implementation("club.minnced:jdave-api:0.1.8")
     // OS별 네이티브 DAVE 구현체
-    runtimeOnly("club.minnced:jdave-native-darwin:0.1.7")
-    runtimeOnly("club.minnced:jdave-native-linux-x86-64:0.1.7")
-    runtimeOnly("club.minnced:jdave-native-linux-aarch64:0.1.7")
+    runtimeOnly("club.minnced:jdave-native-darwin:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-linux-x86-64:0.1.8")
+    runtimeOnly("club.minnced:jdave-native-linux-aarch64:0.1.8")
 
 }
 
