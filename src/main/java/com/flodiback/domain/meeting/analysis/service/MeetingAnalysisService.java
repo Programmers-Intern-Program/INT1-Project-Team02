@@ -2,6 +2,7 @@ package com.flodiback.domain.meeting.analysis.service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -131,7 +132,8 @@ public class MeetingAnalysisService {
     }
 
     private AnalysisResult callGlm(String context) {
-        String raw = glmClient.chat(systemPrompt, context);
+        String prompt = systemPrompt.replace("{today}", LocalDate.now().toString());
+        String raw = glmClient.chat(prompt, context);
         String json = raw.strip()
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")

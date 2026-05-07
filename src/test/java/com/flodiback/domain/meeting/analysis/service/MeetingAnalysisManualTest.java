@@ -38,10 +38,11 @@ class MeetingAnalysisManualTest {
     @Autowired
     private GlmClient glmClient;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Value("classpath:prompts/meeting-analysis-system.md")
     private Resource systemPromptResource;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 샘플 추가 시 이 맵에 한 줄 추가
     private static final Map<String, String> SAMPLES = Map.of("스프린트 회의", """
