@@ -53,9 +53,6 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final long STT_SILENCE_END_MS = 1800L;
     // 무음 종료 감시 주기(ms)
     private static final long STT_SILENCE_WATCH_INTERVAL_MS = 250L;
-    // RMS 폴백 모드에서 사용하는 발화 시작/유지 임계값
-    private static final int VAD_START_RMS_THRESHOLD = 600;
-    private static final int VAD_END_RMS_THRESHOLD = 500;
     // WebRTC VAD 점수 임계값(시작은 엄격, 유지는 완화)
     private static final float VAD_START_PROB_THRESHOLD = 0.62f;
     private static final float VAD_END_PROB_THRESHOLD = 0.45f;
@@ -63,8 +60,6 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final int VAD_MIN_CONSECUTIVE_SPEECH_FRAMES = 3;
     // 발화 시작 시 앞부분 유실을 줄이기 위한 프리롤 길이(ms)
     private static final int VAD_PREROLL_MS = 400;
-    // 초기 환경 적응(노이즈/발화 RMS 수집) 기간
-    private static final long VAD_CALIBRATION_WINDOW_MS = 180_000L;
 
     private final long guildId;
     private final long meetingId;
@@ -98,12 +93,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final AtomicBoolean firstEncodedLogged = new AtomicBoolean(false);
     private final AtomicBoolean firstUserLogged = new AtomicBoolean(false);
     private final AtomicBoolean webRtcVadUnavailableLogged = new AtomicBoolean(false);
-    private final AtomicLong vadStartThreshold = new AtomicLong(VAD_START_RMS_THRESHOLD);
-    private final AtomicLong vadEndThreshold = new AtomicLong(VAD_END_RMS_THRESHOLD);
-    private final AtomicLong calibrationStartedAtMs = new AtomicLong(System.currentTimeMillis());
-    private final AtomicBoolean calibrationDone = new AtomicBoolean(false);
-    private final List<Integer> calibrationNoiseRms = new ArrayList<>();
-    private final List<Integer> calibrationSpeechRms = new ArrayList<>();
+    private final AtomicBoolean webRtcVadEnabledLogged = new AtomicBoolean(false);
 
     /**
      * 하위 호환 생성자.
@@ -195,11 +185,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                 stats.decodedPcmPacketCount.incrementAndGet();
                 stats.decodedPcmByteCount.addAndGet(decodedPcm.length);
 
-                int rms = calculateRms(decodedPcm);
-                // 초기 몇 분은 환경에 맞춰 RMS 임계값을 보정한다.
-                maybeCalibrateVad(now, rms);
-                // 발화 판단 입력값(WebRTC 우선, 실패 시 RMS 폴백)
-                SpeechEvidence speechEvidence = detectSpeechEvidence(userId, decodedPcm, rms);
+                // 발화 판단 입력값(WebRTC-only)
+                SpeechEvidence speechEvidence = detectSpeechEvidence(userId, decodedPcm);
 
                 // 로컬 VAD 상태머신 결과를 기준으로 전송 여부를 결정한다.
                 ForwardDecision decision = evaluateVad(userId, stats, decodedPcm, speechEvidence, now);
@@ -347,10 +334,6 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     + decodedPcmBytes
                     + ", activeSttSessions="
                     + activeSttSessionsByUserId.size()
-                    + ", vadStartThreshold="
-                    + vadStartThreshold.get()
-                    + ", vadEndThreshold="
-                    + vadEndThreshold.get()
                     + ", firstDecodeFailureReason="
                     + (decodeFailureReason == null ? "-" : decodeFailureReason)
                     + ")";
@@ -640,14 +623,14 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         // 시작 직전 유실 방지를 위해 프리롤 버퍼는 항상 유지
         stats.preRollBuffer.add(decodedPcm);
         ActiveSttSession activeSession = activeSttSessionsByUserId.get(userId);
-        long startThreshold = vadStartThreshold.get();
-        long endThreshold = vadEndThreshold.get();
-        boolean startSpeech = speechEvidence.webRtcAvailable
-                ? speechEvidence.webRtcScore >= VAD_START_PROB_THRESHOLD
-                : speechEvidence.rms >= startThreshold;
-        boolean continueSpeech = speechEvidence.webRtcAvailable
-                ? speechEvidence.webRtcScore >= VAD_END_PROB_THRESHOLD
-                : speechEvidence.rms >= endThreshold;
+        if (!speechEvidence.webRtcAvailable) {
+            // webrtc-only: WebRTC VAD를 사용할 수 없는 프레임은 발화 판단에 사용하지 않는다.
+            // 활성 세션이 있어도 이 프레임은 전송하지 않고, silence watcher가 종료를 처리한다.
+            stats.vadState = activeSession == null ? VadState.IDLE : VadState.TRAILING_SILENCE;
+            return ForwardDecision.DROP;
+        }
+        boolean startSpeech = speechEvidence.webRtcScore >= VAD_START_PROB_THRESHOLD;
+        boolean continueSpeech = speechEvidence.webRtcScore >= VAD_END_PROB_THRESHOLD;
 
         if (activeSession != null) {
             if (continueSpeech) {
@@ -689,49 +672,34 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         return ForwardDecision.DROP;
     }
 
-    private int calculateRms(byte[] decodedPcm) {
-        if (decodedPcm == null || decodedPcm.length < 2) {
-            return 0;
-        }
-
-        long sumSquare = 0L;
-        int sampleCount = 0;
-        // JDA 출력은 16-bit signed big-endian PCM
-        // 샘플 제곱평균의 제곱근(RMS)을 계산해 음량 지표로 사용한다.
-        for (int index = 0; index + 1 < decodedPcm.length; index += 2) {
-            int high = decodedPcm[index] & 0xFF;
-            int low = decodedPcm[index + 1] & 0xFF;
-            short sample = (short) ((high << 8) | low);
-            int value = sample;
-            sumSquare += (long) value * value;
-            sampleCount++;
-        }
-
-        if (sampleCount == 0) {
-            return 0;
-        }
-        return (int) Math.sqrt(sumSquare / (double) sampleCount);
-    }
-
-    private SpeechEvidence detectSpeechEvidence(long userId, byte[] decodedPcm, int rms) {
+    private SpeechEvidence detectSpeechEvidence(long userId, byte[] decodedPcm) {
         VAD vad = getOrCreateWebRtcVad(userId);
         if (vad == null) {
-            // 네이티브 VAD 불가 환경에서는 RMS 기반 판단으로 폴백
-            return SpeechEvidence.rmsOnly(rms);
+            // WebRTC VAD를 사용할 수 없으면(네이티브 로딩 실패 등) 이 프레임은 VAD 판단에서 제외한다.
+            // RMS 폴백은 사용하지 않는다(webrtc-only).
+            return SpeechEvidence.unavailable();
         }
 
         byte[] mono48kLe = toMono48kLe(decodedPcm);
         try {
             float score = vad.speechProbability(mono48kLe);
-            return SpeechEvidence.webRtc(score, rms);
+            if (webRtcVadEnabledLogged.compareAndSet(false, true)) {
+                log.info(
+                        "[VAD/WEBRTC활성] guildId={}, startProbThreshold={}, endProbThreshold={}, arch={}",
+                        guildId,
+                        VAD_START_PROB_THRESHOLD,
+                        VAD_END_PROB_THRESHOLD,
+                        System.getProperty("os.arch"));
+            }
+            return SpeechEvidence.webRtc(score);
         } catch (Exception exception) {
             if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
-                log.warn("[VAD/WEBRTC폴백] guildId={}, reason={}", guildId, exception.toString());
+                log.warn("[VAD/WEBRTC실패] guildId={}, reason={}", guildId, exception.toString());
             }
-            // 반복 실패를 피하기 위해 해당 인스턴스를 폐기하고 RMS로 전환
+            // 반복 실패를 피하기 위해 해당 인스턴스를 폐기한다.
             webRtcVadByUserId.remove(userId, vad);
             closeVadQuietly(vad);
-            return SpeechEvidence.rmsOnly(rms);
+            return SpeechEvidence.unavailable();
         }
     }
 
@@ -751,9 +719,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             return created;
         } catch (Throwable throwable) {
             if (webRtcVadUnavailableLogged.compareAndSet(false, true)) {
-                log.warn("[VAD/WEBRTC사용불가] guildId={}, fallback=RMS, reason={}", guildId, throwable.toString());
+                log.warn("[VAD/WEBRTC사용불가] guildId={}, reason={}", guildId, throwable.toString());
             }
-            // 로드 실패/네이티브 예외는 즉시 폴백
             return null;
         }
     }
@@ -788,82 +755,6 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             monoLe[out++] = (byte) ((mono >>> 8) & 0xFF);
         }
         return monoLe;
-    }
-
-    private void maybeCalibrateVad(long now, int rms) {
-        if (calibrationDone.get()) {
-            return;
-        }
-
-        long startedAt = calibrationStartedAtMs.get();
-        if (now - startedAt <= VAD_CALIBRATION_WINDOW_MS) {
-            // 초기 학습 구간:
-            // 임시 threshold 기준으로 noise/speech 샘플을 분리해 수집한다.
-            synchronized (calibrationNoiseRms) {
-                if (rms >= vadStartThreshold.get()) {
-                    calibrationSpeechRms.add(rms);
-                } else {
-                    calibrationNoiseRms.add(rms);
-                }
-            }
-            return;
-        }
-
-        if (!calibrationDone.compareAndSet(false, true)) {
-            return;
-        }
-
-        int[] noise;
-        int[] speech;
-        synchronized (calibrationNoiseRms) {
-            noise = calibrationNoiseRms.stream().mapToInt(Integer::intValue).toArray();
-            speech = calibrationSpeechRms.stream().mapToInt(Integer::intValue).toArray();
-        }
-
-        if (noise.length == 0) {
-            log.info(
-                    "[VAD/캘리브레이션] guildId={}, noise 샘플 부족으로 기본 임계값 유지(start={}, end={})",
-                    guildId,
-                    vadStartThreshold.get(),
-                    vadEndThreshold.get());
-            return;
-        }
-
-        Arrays.sort(noise);
-        Arrays.sort(speech);
-        int noiseP95 = percentile(noise, 95);
-        int speechP50 = speech.length == 0 ? 0 : percentile(speech, 50);
-        int speechP95 = speech.length == 0 ? 0 : percentile(speech, 95);
-
-        // 경험식:
-        // - start는 noise 대비 더 엄격하게(1.8x)
-        // - end는 완화해(1.2x) 짧은 틈에서 발화가 끊기지 않게 한다.
-        long suggestedStart = Math.max(VAD_START_RMS_THRESHOLD, Math.round(noiseP95 * 1.8));
-        long suggestedEnd = Math.max(VAD_END_RMS_THRESHOLD, Math.round(noiseP95 * 1.2));
-        if (suggestedEnd >= suggestedStart) {
-            suggestedEnd = Math.max(VAD_END_RMS_THRESHOLD, suggestedStart - 100);
-        }
-
-        vadStartThreshold.set(suggestedStart);
-        vadEndThreshold.set(suggestedEnd);
-
-        log.info(
-                "[VAD/캘리브레이션완료] guildId={}, noiseP95={}, speechP50={}, speechP95={}, appliedStart={}, appliedEnd={}",
-                guildId,
-                noiseP95,
-                speechP50,
-                speechP95,
-                suggestedStart,
-                suggestedEnd);
-    }
-
-    private int percentile(int[] sortedValues, int percentile) {
-        if (sortedValues.length == 0) {
-            return 0;
-        }
-        int index = (int) Math.ceil((percentile / 100.0) * sortedValues.length) - 1;
-        index = Math.max(0, Math.min(index, sortedValues.length - 1));
-        return sortedValues[index];
     }
 
     /**
@@ -963,20 +854,18 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final class SpeechEvidence {
         private final boolean webRtcAvailable;
         private final float webRtcScore;
-        private final int rms;
 
-        private SpeechEvidence(boolean webRtcAvailable, float webRtcScore, int rms) {
+        private SpeechEvidence(boolean webRtcAvailable, float webRtcScore) {
             this.webRtcAvailable = webRtcAvailable;
             this.webRtcScore = webRtcScore;
-            this.rms = rms;
         }
 
-        private static SpeechEvidence webRtc(float webRtcScore, int rms) {
-            return new SpeechEvidence(true, webRtcScore, rms);
+        private static SpeechEvidence webRtc(float webRtcScore) {
+            return new SpeechEvidence(true, webRtcScore);
         }
 
-        private static SpeechEvidence rmsOnly(int rms) {
-            return new SpeechEvidence(false, 0f, rms);
+        private static SpeechEvidence unavailable() {
+            return new SpeechEvidence(false, 0f);
         }
     }
 
