@@ -33,6 +33,9 @@ public class Project {
     @JoinColumn(name = "server_id", nullable = true)
     private DiscordServer server;
 
+    @Column(name = "channel_id", length = 50)
+    private String channelId;
+
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
@@ -64,8 +67,15 @@ public class Project {
     }
 
     @Builder
-    public Project(DiscordServer server, String name, String description, String techStack, String metadata) {
+    public Project(
+            DiscordServer server,
+            String channelId,
+            String name,
+            String description,
+            String techStack,
+            String metadata) {
         this.server = server;
+        this.channelId = channelId;
         this.name = name;
         this.description = description;
         this.techStack = techStack;

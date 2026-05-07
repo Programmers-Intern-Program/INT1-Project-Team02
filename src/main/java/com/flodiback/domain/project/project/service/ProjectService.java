@@ -13,6 +13,7 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
 import com.flodiback.domain.server.server.repository.DiscordServerRepository;
+import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -25,6 +26,12 @@ public class ProjectService {
     private final DiscordServerRepository discordServerRepository;
 
     public ProjectResponse create(CreateProjectRequest req) {
+        if (req.channelId() != null) {
+            projectRepository.findByChannelId(req.channelId()).ifPresent(p -> {
+                throw new ServiceException("400-2", "이 채널에는 이미 프로젝트가 연결되어 있습니다.");
+            });
+        }
+
         DiscordServer server = null;
         if (req.serverId() != null) {
             server = discordServerRepository
@@ -34,6 +41,7 @@ public class ProjectService {
 
         Project project = Project.builder()
                 .server(server)
+                .channelId(req.channelId())
                 .name(req.name())
                 .description(req.description())
                 .techStack(req.techStack())

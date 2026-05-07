@@ -41,6 +41,14 @@ import net.dv8tion.jda.api.managers.AudioManager;
 public class DiscordCommandListener extends ListenerAdapter {
     private static final Logger log = LoggerFactory.getLogger(DiscordCommandListener.class);
 
+    private enum ProjectCreationStep {
+        WAITING_NAME,
+        WAITING_DESCRIPTION,
+        WAITING_TECH_STACK
+    }
+
+    private record ProjectCreationState(ProjectCreationStep step, String name, String description) {}
+
     // 명령어 접두사(예: !)
     private final String prefix;
     // 실제 STT 엔진 구현체(현재 OpenAI)
@@ -53,6 +61,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
     // 길드별 활성 meetingId
     private final Map<Long, Long> activeMeetingIdByGuild = new ConcurrentHashMap<>();
+    // 채널별 진행 중인 프로젝트 생성 상태
+    private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -72,6 +82,14 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
+        long channelId = event.getChannel().getIdLong();
+
+        // 프로젝트 생성 대화 중인 채널이면 명령어보다 먼저 처리
+        if (pendingProjectCreations.containsKey(channelId)) {
+            handleProjectCreationStep(event, channelId);
+            return;
+        }
+
         String raw = event.getMessage().getContentRaw().trim();
         if (!raw.startsWith(prefix)) {
             return;
@@ -83,9 +101,113 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "join" -> handleJoin(event);
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
+            case "project start" -> handleProjectStart(event, channelId);
             default -> {
                 // 미지원 명령은 조용히 무시
             }
+        }
+    }
+
+    private void handleProjectStart(MessageReceivedEvent event, long channelId) {
+        pendingProjectCreations.put(channelId, new ProjectCreationState(ProjectCreationStep.WAITING_NAME, null, null));
+        event.getChannel().sendMessage("프로젝트 이름을 입력해주세요.").queue();
+    }
+
+    private void handleProjectCreationStep(MessageReceivedEvent event, long channelId) {
+        String input = event.getMessage().getContentRaw().trim();
+        ProjectCreationState state = pendingProjectCreations.get(channelId);
+
+        switch (state.step()) {
+            case WAITING_NAME -> {
+                if (input.isBlank()) {
+                    event.getChannel()
+                            .sendMessage("프로젝트 이름은 필수입니다. 이름을 입력해주세요.")
+                            .queue();
+                    return;
+                }
+                pendingProjectCreations.put(
+                        channelId, new ProjectCreationState(ProjectCreationStep.WAITING_DESCRIPTION, input, null));
+                event.getChannel().sendMessage("프로젝트 설명을 입력해주세요. (건너뛰려면 '.')").queue();
+            }
+            case WAITING_DESCRIPTION -> {
+                String description = ".".equals(input) ? null : input;
+                pendingProjectCreations.put(
+                        channelId,
+                        new ProjectCreationState(ProjectCreationStep.WAITING_TECH_STACK, state.name(), description));
+                event.getChannel().sendMessage("기술 스택을 입력해주세요. (건너뛰려면 '.')").queue();
+            }
+            case WAITING_TECH_STACK -> {
+                String techStack = ".".equals(input) ? null : input;
+                pendingProjectCreations.remove(channelId);
+                Long projectId = createProject(
+                        event.getChannel().getIdLong(),
+                        event.getGuild().getIdLong(),
+                        state.name(),
+                        state.description(),
+                        techStack,
+                        event);
+                if (projectId != null) {
+                    event.getChannel()
+                            .sendMessage("✅ 프로젝트 [" + state.name() + "]가 생성됐습니다! (id=" + projectId + ")")
+                            .queue();
+                }
+            }
+        }
+    }
+
+    private Long createProject(
+            long channelId,
+            long guildId,
+            String name,
+            String description,
+            String techStack,
+            MessageReceivedEvent event) {
+        try {
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("name", name);
+            if (description != null) body.put("description", description);
+            else body.putNull("description");
+            if (techStack != null) body.put("techStack", techStack);
+            else body.putNull("techStack");
+            body.putNull("serverId");
+            body.put("channelId", String.valueOf(channelId));
+
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+            attachInternalApiKey(requestBuilder);
+
+            HttpResponse<String> response =
+                    httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() / 100 != 2) {
+                log.warn(
+                        "[프로젝트/생성실패] channelId={}, status={}, body={}",
+                        channelId,
+                        response.statusCode(),
+                        response.body());
+                event.getChannel()
+                        .sendMessage("❌ 프로젝트 생성에 실패했습니다. 서버 로그를 확인해주세요.")
+                        .queue();
+                return null;
+            }
+
+            JsonNode root = objectMapper.readTree(response.body());
+            JsonNode idNode = root.path("data").path("id");
+            if (!idNode.isNumber()) {
+                log.warn("[프로젝트/생성응답오류] channelId={}, body={}", channelId, response.body());
+                event.getChannel().sendMessage("❌ 프로젝트 생성 응답 오류입니다.").queue();
+                return null;
+            }
+
+            long projectId = idNode.asLong();
+            log.info("[프로젝트/생성성공] channelId={}, projectId={}", channelId, projectId);
+            return projectId;
+        } catch (Exception e) {
+            log.warn("[프로젝트/생성예외] channelId={}", channelId, e);
+            event.getChannel().sendMessage("❌ 프로젝트 생성 중 오류가 발생했습니다.").queue();
+            return null;
         }
     }
 
