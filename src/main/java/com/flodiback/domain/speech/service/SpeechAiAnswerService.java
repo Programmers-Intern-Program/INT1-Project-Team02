@@ -98,10 +98,10 @@ public class SpeechAiAnswerService {
         appendMeetingStartContext(prompt, context.startContext());
 
         prompt.append("\n[현재 회의 컨텍스트]\n");
-        prompt.append("rolling summary:\n");
+        prompt.append("롤링 요약:\n");
         appendRollingSummary(prompt, context.shortTerm().rollingSummary());
 
-        prompt.append("\nrecent utterances:\n");
+        prompt.append("\n최근 발화:\n");
         appendRecentUtterances(prompt, context.shortTerm().recentUtterances());
 
         prompt.append("\n[질문 관련 추가 기억]\n");
@@ -113,30 +113,28 @@ public class SpeechAiAnswerService {
     }
 
     private void appendMeetingStartContext(StringBuilder prompt, MeetingStartContext context) {
-        prompt.append("projectName: ")
-                .append(valueOrNone(context.projectName()))
-                .append("\n");
-        prompt.append("techStack: ").append(valueOrNone(context.techStack())).append("\n");
-        prompt.append("metadata: ").append(valueOrNone(context.metadata())).append("\n");
+        prompt.append("프로젝트명: ").append(valueOrNone(context.projectName())).append("\n");
+        prompt.append("기술 스택: ").append(valueOrNone(context.techStack())).append("\n");
+        prompt.append("메타데이터: ").append(valueOrNone(context.metadata())).append("\n");
 
-        prompt.append("\nrecent decisions:\n");
+        prompt.append("\n최근 결정사항:\n");
         appendDecisions(prompt, context.recentDecisions());
 
-        prompt.append("\nrecent meeting summaries:\n");
+        prompt.append("\n최근 회의 요약:\n");
         appendPastSummaries(prompt, context.recentSummaries());
 
-        prompt.append("\nunresolved items:\n");
+        prompt.append("\n미결 사항:\n");
         appendTextBlock(prompt, context.unresolvedItems());
 
-        prompt.append("\nactive work logs:\n");
+        prompt.append("\n진행 중 작업:\n");
         appendWorkLogs(prompt, context.activeWorkLogs());
     }
 
     private void appendQuestionContext(StringBuilder prompt, QuestionContext context) {
-        prompt.append("related decisions:\n");
+        prompt.append("관련 결정사항:\n");
         appendDecisions(prompt, context.decisions());
 
-        prompt.append("\nrelated meeting summaries:\n");
+        prompt.append("\n관련 회의 요약:\n");
         appendPastSummaries(prompt, context.pastSummaries());
     }
 
@@ -209,11 +207,11 @@ public class SpeechAiAnswerService {
 
         workLogs.forEach(workLog -> prompt.append("- ")
                 .append(workLog.task())
-                .append(" / assignee: ")
+                .append(" / 담당자: ")
                 .append(valueOrNone(workLog.assigneeName()))
-                .append(" / due: ")
+                .append(" / 기한: ")
                 .append(workLog.dueDate() == null ? "없음" : workLog.dueDate())
-                .append(" / status: ")
+                .append(" / 상태: ")
                 .append(valueOrNone(workLog.status()))
                 .append("\n"));
     }
