@@ -159,6 +159,9 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "join" -> handleJoin(event);
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
+            case "help" -> handleHelp(event);
+            case "project" -> new Thread(() -> handleProject(event, channelId)).start();
+            case "meeting" -> handleMeeting(event);
             case "project start" -> handleProjectStart(event, channelId);
             case "meeting start" -> {
                 Member member = event.getMember();
@@ -665,6 +668,64 @@ public class DiscordCommandListener extends ListenerAdapter {
             return value;
         }
         return value.substring(0, maxLength - 3) + "...";
+    }
+
+    private static final String PROJECT_COMMANDS = """
+            **프로젝트 명령어**
+            `!project`                현재 프로젝트 조회
+            `!project list`           프로젝트 목록 조회
+            `!project start`          새 프로젝트 생성
+            `!project start {id}`     기존 프로젝트 선택
+            `!project end`            현재 프로젝트 연결 해제
+            `!project edit`           프로젝트 정보 수정
+            `!project delete`         프로젝트 삭제""";
+
+    private static final String MEETING_COMMANDS = """
+            **회의 명령어**
+            `!meeting`                현재 회의 조회
+            `!meeting list`           현재 프로젝트 회의 목록 조회
+            `!meeting start`          회의 시작
+            `!meeting end`            회의 종료
+            `!meeting delete`         회의 기록 삭제""";
+
+    private void handleHelp(MessageReceivedEvent event) {
+        event.getChannel()
+                .sendMessage("📋 **Flodi 봇 명령어 안내**\n\n" + PROJECT_COMMANDS + "\n\n" + MEETING_COMMANDS)
+                .queue();
+    }
+
+    private void handleProject(MessageReceivedEvent event, long channelId) {
+        Long projectId = fetchProjectIdByChannel(channelId);
+        String header;
+        if (projectId == null) {
+            header = "⚠️ 연결된 프로젝트가 없어요. `!project start`로 생성하거나 `!project start {id}`로 선택하세요.";
+        } else {
+            try {
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId))
+                        .GET();
+                attachInternalApiKey(req);
+                HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                JsonNode data = objectMapper.readTree(response.body()).path("data");
+                String name = data.path("name").asText("-");
+                String description = data.path("description").asText("-");
+                String techStack = data.path("techStack").asText("-");
+                header = "📁 **현재 프로젝트**\n이름: " + name + "\n설명: " + description + "\n기술스택: " + techStack;
+            } catch (Exception e) {
+                log.warn("[프로젝트/조회예외] channelId={}", channelId, e);
+                header = "❌ 프로젝트 조회 중 오류가 발생했습니다.";
+            }
+        }
+        event.getChannel().sendMessage(header + "\n\n" + PROJECT_COMMANDS).queue();
+    }
+
+    private void handleMeeting(MessageReceivedEvent event) {
+        long guildId = event.getGuild().getIdLong();
+        Long meetingId = activeMeetingIdByGuild.get(guildId);
+        String header = meetingId != null
+                ? "🎙️ **현재 회의 진행 중** (meetingId=" + meetingId + ")"
+                : "현재 진행 중인 회의가 없어요. `!meeting start`로 시작하세요.";
+        event.getChannel().sendMessage(header + "\n\n" + MEETING_COMMANDS).queue();
     }
 
     private void handleProjectStart(MessageReceivedEvent event, long channelId) {
