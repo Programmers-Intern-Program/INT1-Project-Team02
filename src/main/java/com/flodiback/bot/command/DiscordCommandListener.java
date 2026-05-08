@@ -574,7 +574,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             HttpResponse<String> response =
                     httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
-                log.warn("[??API?브퀗?????덉넮] action={}, path={}, status={}", action, path, response.statusCode());
+                log.warn("[봇/API조회실패] action={}, path={}, status={}", action, path, response.statusCode());
                 return null;
             }
 
@@ -584,7 +584,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             return data;
         } catch (Exception exception) {
-            log.warn("[??API?브퀗?????깅뇶] action={}, path={}", action, path, exception);
+            log.warn("[봇/API조회예외] action={}, path={}", action, path, exception);
             return null;
         }
     }
@@ -601,7 +601,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 log.warn(
-                        "[??API??諛댁뎽???덉넮] action={}, path={}, status={}, body={}",
+                        "[봇/API생성실패] action={}, path={}, status={}, body={}",
                         action,
                         path,
                         response.statusCode(),
@@ -612,7 +612,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             JsonNode data = objectMapper.readTree(response.body()).path("data");
             return data.isMissingNode() || data.isNull() ? null : data;
         } catch (Exception exception) {
-            log.warn("[??API??諛댁뎽???깅뇶] action={}, path={}", action, path, exception);
+            log.warn("[봇/API생성예외] action={}, path={}", action, path, exception);
             return null;
         }
     }
@@ -810,7 +810,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                 return null;
             }
             if (response.statusCode() / 100 != 2) {
-                log.warn("[?熬곣뫁夷??釉띾콦/嶺??х몭硫??⑥쥙????덉넮] channelId={}, status={}", channelId, response.statusCode());
+                log.warn("[프로젝트/채널조회실패] channelId={}, status={}", channelId, response.statusCode());
                 return null;
             }
 
@@ -818,7 +818,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     objectMapper.readTree(response.body()).path("data").path("id");
             return idNode.isNumber() ? idNode.asLong() : null;
         } catch (Exception e) {
-            log.warn("[?熬곣뫁夷??釉띾콦/嶺??х몭硫??⑥쥙????깅뇶] channelId={}", channelId, e);
+            log.warn("[프로젝트/채널조회예외] channelId={}", channelId, e);
             return null;
         }
     }
@@ -888,7 +888,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
             if (response.statusCode() / 100 != 2) {
                 log.warn(
-                        "[?熬곣뫁夷??釉띾콦/??諛댁뎽???덉넮] channelId={}, status={}, body={}",
+                        "[프로젝트/생성실패] channelId={}, status={}, body={}",
                         channelId,
                         response.statusCode(),
                         response.body());
@@ -901,16 +901,16 @@ public class DiscordCommandListener extends ListenerAdapter {
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode idNode = root.path("data").path("id");
             if (!idNode.isNumber()) {
-                log.warn("[?熬곣뫁夷??釉띾콦/??諛댁뎽??얜Ŧ堉???댁쾼] channelId={}, body={}", channelId, response.body());
+                log.warn("[프로젝트/생성응답오류] channelId={}, body={}", channelId, response.body());
                 event.getChannel().sendMessage("프로젝트 생성 응답 오류입니다.").queue();
                 return null;
             }
 
             long projectId = idNode.asLong();
-            log.info("[?熬곣뫁夷??釉띾콦/??諛댁뎽?繹먭퍓沅? channelId={}, projectId={}", channelId, projectId);
+            log.info("[프로젝트/생성성공] channelId={}, projectId={}", channelId, projectId);
             return projectId;
         } catch (Exception e) {
-            log.warn("[?熬곣뫁夷??釉띾콦/??諛댁뎽???깅뇶] channelId={}", channelId, e);
+            log.warn("[프로젝트/생성예외] channelId={}", channelId, e);
             event.getChannel().sendMessage("프로젝트 생성 중 오류가 발생했습니다.").queue();
             return null;
         }
