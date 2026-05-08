@@ -78,6 +78,18 @@ public class ProjectService {
         return toResponse(project);
     }
 
+    public void connectChannel(Long id, String channelId) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        project.connectChannel(channelId);
+    }
+
+    public void disconnectChannel(Long id) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        project.disconnectChannel();
+    }
+
     public void delete(Long id) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));

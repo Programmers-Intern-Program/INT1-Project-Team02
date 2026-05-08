@@ -56,6 +56,18 @@ public class ProjectController {
         return RsData.of("200-1", "프로젝트가 수정되었습니다.", projectService.update(id, req));
     }
 
+    @PutMapping("/{id}/channel/{channelId}")
+    public RsData<Void> connectChannel(@PathVariable Long id, @PathVariable String channelId) {
+        projectService.connectChannel(id, channelId);
+        return RsData.of("200-1", "채널이 연결되었습니다.");
+    }
+
+    @DeleteMapping("/{id}/channel")
+    public RsData<Void> disconnectChannel(@PathVariable Long id) {
+        projectService.disconnectChannel(id);
+        return RsData.of("200-1", "채널 연결이 해제되었습니다.");
+    }
+
     @DeleteMapping("/{id}")
     public RsData<Void> delete(@PathVariable Long id) {
         projectService.delete(id);

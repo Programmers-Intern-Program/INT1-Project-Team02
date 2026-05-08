@@ -98,6 +98,11 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record MeetingConfirmationState(MeetingStartContext ctx, long createdAt) {}
 
+    private record ProjectEditState(
+            ProjectCreationStep step, String name, String description, long projectId, long createdAt) {}
+
+    private record ProjectDeletionState(long projectId, long createdAt) {}
+
     // 명령어 접두사. 기본값은 !.
     private final String prefix;
     // 실제 STT 엔진 구현체. 현재 기본값은 OpenAI.
@@ -114,6 +119,10 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
     // 채널별 회의 시작 확인 대기 상태
     private final Map<Long, MeetingConfirmationState> pendingMeetingConfirmations = new ConcurrentHashMap<>();
+    // 채널별 프로젝트 수정 상태
+    private final Map<Long, ProjectEditState> pendingProjectEdits = new ConcurrentHashMap<>();
+    // 채널별 프로젝트 삭제 확인 대기 상태
+    private final Map<Long, ProjectDeletionState> pendingProjectDeletions = new ConcurrentHashMap<>();
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -147,6 +156,18 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
+        // 프로젝트 수정 대화 중인 채널이면 먼저 처리
+        if (pendingProjectEdits.containsKey(channelId)) {
+            new Thread(() -> handleProjectEditStep(event, channelId)).start();
+            return;
+        }
+
+        // 프로젝트 삭제 확인 대기 중인 채널이면 먼저 처리
+        if (pendingProjectDeletions.containsKey(channelId)) {
+            new Thread(() -> handleProjectDeletionStep(event, channelId)).start();
+            return;
+        }
+
         String raw = event.getMessage().getContentRaw().trim();
         if (!raw.startsWith(prefix)) {
             return;
@@ -163,6 +184,10 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "project" -> new Thread(() -> handleProject(event, channelId)).start();
             case "meeting" -> handleMeeting(event);
             case "project start" -> handleProjectStart(event, channelId);
+            case "project list" -> new Thread(() -> handleProjectList(event)).start();
+            case "project end" -> new Thread(() -> handleProjectEnd(event, channelId)).start();
+            case "project edit" -> new Thread(() -> handleProjectEdit(event, channelId)).start();
+            case "project delete" -> new Thread(() -> handleProjectDelete(event, channelId)).start();
             case "meeting start" -> {
                 Member member = event.getMember();
                 if (member == null
@@ -183,7 +208,11 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
-                // 알 수 없는 명령은 조용히 무시
+                if (command.startsWith("project start ")) {
+                    String arg = command.substring("project start ".length()).trim();
+                    new Thread(() -> handleProjectStartWithArg(event, channelId, arg)).start();
+                }
+                // 그 외 알 수 없는 명령은 조용히 무시
             }
         }
     }
@@ -726,6 +755,249 @@ public class DiscordCommandListener extends ListenerAdapter {
                 ? "🎙️ **현재 회의 진행 중** (meetingId=" + meetingId + ")"
                 : "현재 진행 중인 회의가 없어요. `!meeting start`로 시작하세요.";
         event.getChannel().sendMessage(header + "\n\n" + MEETING_COMMANDS).queue();
+    }
+
+    private void handleProjectList(MessageReceivedEvent event) {
+        try {
+            HttpRequest.Builder req = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                    .GET();
+            attachInternalApiKey(req);
+            HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                event.getChannel().sendMessage("📋 등록된 프로젝트가 없어요.").queue();
+                return;
+            }
+            StringBuilder sb = new StringBuilder("📋 **프로젝트 목록**\n");
+            for (JsonNode p : data) {
+                sb.append("`id=").append(p.path("id").asText()).append("` ");
+                sb.append(p.path("name").asText()).append("\n");
+            }
+            event.getChannel().sendMessage(sb.toString().trim()).queue();
+        } catch (Exception e) {
+            log.warn("[프로젝트/목록예외]", e);
+            event.getChannel().sendMessage("❌ 프로젝트 목록 조회 중 오류가 발생했습니다.").queue();
+        }
+    }
+
+    private void handleProjectStartWithArg(MessageReceivedEvent event, long channelId, String arg) {
+        try {
+            // id로 조회 시도, 실패하면 name으로 검색
+            Long projectId = null;
+            try {
+                long id = Long.parseLong(arg);
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + id))
+                        .GET();
+                attachInternalApiKey(req);
+                HttpResponse<String> resp = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() / 100 == 2) {
+                    projectId = objectMapper
+                            .readTree(resp.body())
+                            .path("data")
+                            .path("id")
+                            .asLong();
+                }
+            } catch (NumberFormatException ignored) {
+                // 숫자가 아니면 name으로 검색
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                        .GET();
+                attachInternalApiKey(req);
+                HttpResponse<String> resp = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                JsonNode list = objectMapper.readTree(resp.body()).path("data");
+                for (JsonNode p : list) {
+                    if (arg.equalsIgnoreCase(p.path("name").asText())) {
+                        projectId = p.path("id").asLong();
+                        break;
+                    }
+                }
+            }
+
+            if (projectId == null) {
+                event.getChannel()
+                        .sendMessage("❌ `" + arg + "`에 해당하는 프로젝트를 찾을 수 없어요.")
+                        .queue();
+                return;
+            }
+
+            // 채널에 프로젝트 연결
+            HttpRequest.Builder connectReq = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel/" + channelId))
+                    .PUT(HttpRequest.BodyPublishers.noBody());
+            attachInternalApiKey(connectReq);
+            HttpResponse<String> connectResp =
+                    httpClient.send(connectReq.build(), HttpResponse.BodyHandlers.ofString());
+            if (connectResp.statusCode() / 100 != 2) {
+                event.getChannel().sendMessage("❌ 프로젝트 연결에 실패했습니다.").queue();
+                return;
+            }
+
+            JsonNode data = objectMapper.readTree(connectResp.body());
+            event.getChannel()
+                    .sendMessage("✅ 프로젝트 (id=" + projectId + ")에 이 채널을 연결했습니다.")
+                    .queue();
+            log.info("[프로젝트/채널연결] projectId={}, channelId={}", projectId, channelId);
+        } catch (Exception e) {
+            log.warn("[프로젝트/선택예외] arg={}", arg, e);
+            event.getChannel().sendMessage("❌ 프로젝트 선택 중 오류가 발생했습니다.").queue();
+        }
+    }
+
+    private void handleProjectEnd(MessageReceivedEvent event, long channelId) {
+        Long projectId = fetchProjectIdByChannel(channelId);
+        if (projectId == null) {
+            event.getChannel().sendMessage("이 채널에 연결된 프로젝트가 없어요.").queue();
+            return;
+        }
+        try {
+            HttpRequest.Builder req = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel"))
+                    .DELETE();
+            attachInternalApiKey(req);
+            HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                event.getChannel().sendMessage("❌ 프로젝트 연결 해제에 실패했습니다.").queue();
+                return;
+            }
+            event.getChannel().sendMessage("✅ 프로젝트 연결이 해제됐습니다.").queue();
+            log.info("[프로젝트/채널해제] projectId={}, channelId={}", projectId, channelId);
+        } catch (Exception e) {
+            log.warn("[프로젝트/채널해제예외] projectId={}", projectId, e);
+            event.getChannel().sendMessage("❌ 프로젝트 연결 해제 중 오류가 발생했습니다.").queue();
+        }
+    }
+
+    private void handleProjectEdit(MessageReceivedEvent event, long channelId) {
+        Long projectId = fetchProjectIdByChannel(channelId);
+        if (projectId == null) {
+            event.getChannel()
+                    .sendMessage("이 채널에 연결된 프로젝트가 없어요. `!project start {id}`로 프로젝트를 선택해주세요.")
+                    .queue();
+            return;
+        }
+        pendingProjectEdits.put(
+                channelId,
+                new ProjectEditState(
+                        ProjectCreationStep.WAITING_NAME, null, null, projectId, System.currentTimeMillis()));
+        event.getChannel().sendMessage("새 프로젝트 이름을 입력해주세요. (건너뛰려면 '.')").queue();
+    }
+
+    private void handleProjectDelete(MessageReceivedEvent event, long channelId) {
+        Long projectId = fetchProjectIdByChannel(channelId);
+        if (projectId == null) {
+            event.getChannel().sendMessage("이 채널에 연결된 프로젝트가 없어요.").queue();
+            return;
+        }
+        pendingProjectDeletions.put(channelId, new ProjectDeletionState(projectId, System.currentTimeMillis()));
+        event.getChannel()
+                .sendMessage("⚠️ 정말로 프로젝트를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다. (yes / no)")
+                .queue();
+    }
+
+    private void handleProjectEditStep(MessageReceivedEvent event, long channelId) {
+        ProjectEditState state = pendingProjectEdits.get(channelId);
+
+        if (System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
+            pendingProjectEdits.remove(channelId);
+            event.getChannel()
+                    .sendMessage("⏰ 수정 시간이 초과됐습니다. 다시 `!project edit`를 입력해주세요.")
+                    .queue();
+            return;
+        }
+
+        String input = event.getMessage().getContentRaw().trim();
+        String value = ".".equals(input) ? null : input;
+
+        switch (state.step()) {
+            case WAITING_NAME -> {
+                pendingProjectEdits.put(
+                        channelId,
+                        new ProjectEditState(
+                                ProjectCreationStep.WAITING_DESCRIPTION,
+                                value,
+                                null,
+                                state.projectId(),
+                                state.createdAt()));
+                event.getChannel().sendMessage("설명을 입력해주세요. (건너뛰려면 '.')").queue();
+            }
+            case WAITING_DESCRIPTION -> {
+                pendingProjectEdits.put(
+                        channelId,
+                        new ProjectEditState(
+                                ProjectCreationStep.WAITING_TECH_STACK,
+                                state.name(),
+                                value,
+                                state.projectId(),
+                                state.createdAt()));
+                event.getChannel().sendMessage("기술 스택을 입력해주세요. (건너뛰려면 '.')").queue();
+            }
+            case WAITING_TECH_STACK -> {
+                pendingProjectEdits.remove(channelId);
+                try {
+                    ObjectNode body = objectMapper.createObjectNode();
+                    body.put("name", state.name());
+                    body.put("description", state.description());
+                    body.put("techStack", value);
+
+                    HttpRequest.Builder req = HttpRequest.newBuilder()
+                            .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + state.projectId()))
+                            .header("Content-Type", "application/json")
+                            .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+                    attachInternalApiKey(req);
+                    HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                    if (response.statusCode() / 100 != 2) {
+                        event.getChannel().sendMessage("❌ 프로젝트 수정에 실패했습니다.").queue();
+                        return;
+                    }
+                    event.getChannel().sendMessage("✅ 프로젝트가 수정됐습니다.").queue();
+                } catch (Exception e) {
+                    log.warn("[프로젝트/수정예외] projectId={}", state.projectId(), e);
+                    event.getChannel().sendMessage("❌ 프로젝트 수정 중 오류가 발생했습니다.").queue();
+                }
+            }
+        }
+    }
+
+    private void handleProjectDeletionStep(MessageReceivedEvent event, long channelId) {
+        ProjectDeletionState state = pendingProjectDeletions.get(channelId);
+
+        if (System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
+            pendingProjectDeletions.remove(channelId);
+            event.getChannel()
+                    .sendMessage("⏰ 응답 시간이 초과됐습니다. 다시 `!project delete`를 입력해주세요.")
+                    .queue();
+            return;
+        }
+
+        String input = event.getMessage().getContentRaw().trim().toLowerCase();
+        pendingProjectDeletions.remove(channelId);
+
+        if ("yes".equals(input)) {
+            try {
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + state.projectId()))
+                        .DELETE();
+                attachInternalApiKey(req);
+                HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() / 100 != 2) {
+                    event.getChannel().sendMessage("❌ 프로젝트 삭제에 실패했습니다.").queue();
+                    return;
+                }
+                event.getChannel().sendMessage("✅ 프로젝트가 삭제됐습니다.").queue();
+                log.info("[프로젝트/삭제] projectId={}", state.projectId());
+            } catch (Exception e) {
+                log.warn("[프로젝트/삭제예외] projectId={}", state.projectId(), e);
+                event.getChannel().sendMessage("❌ 프로젝트 삭제 중 오류가 발생했습니다.").queue();
+            }
+        } else if ("no".equals(input)) {
+            event.getChannel().sendMessage("프로젝트 삭제를 취소했습니다.").queue();
+        } else {
+            event.getChannel()
+                    .sendMessage("'yes' 또는 'no'로 답해주세요. 다시 `!project delete`를 입력해주세요.")
+                    .queue();
+        }
     }
 
     private void handleProjectStart(MessageReceivedEvent event, long channelId) {
