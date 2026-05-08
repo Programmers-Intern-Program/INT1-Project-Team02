@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -56,6 +57,7 @@ public class GlmClient {
     private final Function<ChatCompletionCreateParams, ChatCompletion> completionRequester;
     private final String model;
 
+    @Autowired
     public GlmClient(
             @Value("${glm.api.key}") String apiKey,
             @Value("${glm.api.model}") String model,
