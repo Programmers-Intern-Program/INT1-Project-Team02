@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: zunobk
+reviewed-at: 2026-05-08
+evidence: PR64
 ---
 
 # GLM Timeout Retry Latency Logging
