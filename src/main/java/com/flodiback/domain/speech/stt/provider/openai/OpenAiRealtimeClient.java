@@ -30,7 +30,7 @@ final class OpenAiRealtimeClient {
     private static final String ENV_OPENAI_TRANSCRIBE_MODEL = "OPENAI_TRANSCRIBE_MODEL";
     private static final String ENV_OPENAI_TRANSCRIBE_LANGUAGE = "OPENAI_TRANSCRIBE_LANGUAGE";
 
-    private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe";
+    private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-realtime-whisper";
     private static final String DEFAULT_TRANSCRIBE_LANGUAGE = "ko";
     private static final Duration COMMIT_WAIT_TIMEOUT = Duration.ofSeconds(8);
     private static final int REALTIME_SAMPLE_RATE = 24_000;
