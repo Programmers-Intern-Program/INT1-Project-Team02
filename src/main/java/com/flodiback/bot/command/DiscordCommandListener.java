@@ -1,13 +1,17 @@
 package com.flodiback.bot.command;
 
+import java.awt.Color;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,21 +24,34 @@ import com.flodiback.bot.audio.PerUserAudioReceiveHandler;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
+import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.audio.hooks.ConnectionListener;
 import net.dv8tion.jda.api.audio.hooks.ConnectionStatus;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
+import net.dv8tion.jda.api.components.buttons.Button;
+import net.dv8tion.jda.api.components.label.Label;
+import net.dv8tion.jda.api.components.selections.SelectOption;
+import net.dv8tion.jda.api.components.selections.StringSelectMenu;
+import net.dv8tion.jda.api.components.textinput.TextInput;
+import net.dv8tion.jda.api.components.textinput.TextInputStyle;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
+import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.managers.AudioManager;
+import net.dv8tion.jda.api.modals.Modal;
 
 /**
- * Discord 텍스트 명령 처리 리스너.
+ * Discord ???⑸츩??嶺뚮ㅏ援앲??嶺뚳퐣瑗???洹먮봾裕??
  *
- * <p>현재 지원 명령:
+ * <p>?熬곣뫗??嶺뚯솘???嶺뚮ㅏ援앲??
  * - !ping
  * - !join
  * - !leave
@@ -42,6 +59,23 @@ import net.dv8tion.jda.api.managers.AudioManager;
  */
 public class DiscordCommandListener extends ListenerAdapter {
     private static final Logger log = LoggerFactory.getLogger(DiscordCommandListener.class);
+    private static final Color FLODI_COLOR = new Color(88, 166, 255);
+    private static final String PANEL_COMMAND = "flodi";
+    private static final String BUTTON_PANEL_OPEN = "flodi:panel:open";
+    private static final String BUTTON_DASHBOARD_VIEW = "flodi:dashboard:view";
+    private static final String BUTTON_PROJECT_CREATE = "flodi:project:create";
+    private static final String BUTTON_MEETING_START = "flodi:meeting:start";
+    private static final String BUTTON_MEETING_END = "flodi:meeting:end";
+    private static final String BUTTON_MEETING_START_WITHOUT_PROJECT = "flodi:meeting:start-without-project";
+    private static final String BUTTON_MEETING_CANCEL = "flodi:meeting:cancel";
+    private static final String SELECT_PROJECT = "flodi:project:select";
+    private static final String MODAL_PROJECT_CREATE = "flodi:project:create-modal";
+    private static final String MODAL_PROJECT_NAME = "flodi:project:name";
+    private static final String MODAL_PROJECT_DESCRIPTION = "flodi:project:description";
+    private static final String MODAL_PROJECT_TECH_STACK = "flodi:project:tech-stack";
+    private static final int PROJECT_SELECT_LIMIT = 25;
+    private static final int DECISION_PREVIEW_LIMIT = 3;
+    private static final int TEMPORARY_MESSAGE_SECONDS = 45;
 
     private enum ProjectCreationStep {
         WAITING_NAME,
@@ -64,22 +98,23 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record MeetingConfirmationState(MeetingStartContext ctx, long createdAt) {}
 
-    // 명령어 접두사(예: !)
+    // 嶺뚮ㅏ援앲?????얜Ŧ????? !)
     private final String prefix;
-    // 실제 STT 엔진 구현체(현재 OpenAI)
+    // ???깆젷 STT ??븐슦異???뚮뿭寃긺춯??熬곣뫗??OpenAI)
     private final SttProvider sttProvider;
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String internalBaseUrl;
     private final String internalApiKey;
-    // 길드별 오디오 수신 핸들러 캐시
+    // ?ル梨띈キ?덊돦????논꺏????琉용뼁 ?筌뤾퍓援??嶺?흮??
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
-    // 길드별 활성 meetingId
+    // ?ル梨띈キ?덊돦???戮?뎽 meetingId
     private final Map<Long, Long> activeMeetingIdByGuild = new ConcurrentHashMap<>();
-    // 채널별 진행 중인 프로젝트 생성 상태
+    // 嶺??х몭硫깊돦?嶺뚯쉳?듸쭛?繞벿살탳???熬곣뫁夷??釉띾콦 ??諛댁뎽 ??⑤객臾?
     private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
-    // 채널별 회의 시작 확인 대기 상태
+    // 嶺??х몭硫깊돦????踰???戮곗굚 ?筌먦끉逾???????⑤객臾?
     private final Map<Long, MeetingConfirmationState> pendingMeetingConfirmations = new ConcurrentHashMap<>();
+    // 嶺??х몭硫깊돦?嶺뚣끉裕??Flodi ???븐꽢 嶺뚮∥???낆??
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -94,20 +129,20 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
-        // 봇 메시지/DM은 명령 처리 대상에서 제외
+        // ??嶺뚮∥???낆??/DM?? 嶺뚮ㅏ援앲??嶺뚳퐣瑗??????⑤챶?????戮곕뇶
         if (event.getAuthor().isBot() || !event.isFromGuild()) {
             return;
         }
 
         long channelId = event.getChannel().getIdLong();
 
-        // 회의 시작 확인 대기 중인 채널이면 먼저 처리
+        // ???踰???戮곗굚 ?筌먦끉逾?????繞벿살탳??嶺??х몭??????誘る닔? 嶺뚳퐣瑗??
         if (pendingMeetingConfirmations.containsKey(channelId)) {
             handleMeetingConfirmationStep(event, channelId);
             return;
         }
 
-        // 프로젝트 생성 대화 중인 채널이면 명령어보다 먼저 처리
+        // ?熬곣뫁夷??釉띾콦 ??諛댁뎽 ????繞벿살탳??嶺??х몭?????嶺뚮ㅏ援앲????????誘る닔? 嶺뚳퐣瑗??
         if (pendingProjectCreations.containsKey(channelId)) {
             handleProjectCreationStep(event, channelId);
             return;
@@ -121,6 +156,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         String command = raw.substring(prefix.length()).trim().toLowerCase();
         switch (command) {
             case "ping" -> event.getChannel().sendMessage("pong").queue();
+            case PANEL_COMMAND -> sendPanelLauncher(event.getChannel());
             case "join" -> handleJoin(event);
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
@@ -145,9 +181,491 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
-                // 미지원 명령은 조용히 무시
+                // 亦껋꼶梨???嶺뚮ㅏ援앲??? ?브퀗??????쒕샍??
             }
         }
+    }
+
+    @Override
+    public void onButtonInteraction(ButtonInteractionEvent event) {
+        if (!event.isFromGuild()) {
+            event.reply("서버 채널에서만 사용할 수 있어요.").setEphemeral(true).queue();
+            return;
+        }
+
+        switch (event.getComponentId()) {
+            case BUTTON_PANEL_OPEN -> {
+                event.replyEmbeds(buildFlodiPanelEmbed().build())
+                        .setComponents(buildFlodiPanelComponents())
+                        .setEphemeral(true)
+                        .queue();
+            }
+            case BUTTON_DASHBOARD_VIEW -> {
+                event.deferReply(true).queue();
+                showDashboard(event);
+            }
+            case BUTTON_PROJECT_CREATE ->
+                event.replyModal(buildProjectCreateModal()).queue();
+            case BUTTON_MEETING_START -> handleMeetingStartButton(event);
+            case BUTTON_MEETING_START_WITHOUT_PROJECT -> handleMeetingStartWithoutProjectButton(event);
+            case BUTTON_MEETING_CANCEL -> {
+                pendingMeetingConfirmations.remove(event.getChannel().getIdLong());
+                event.reply("회의 시작을 취소했습니다.").setEphemeral(true).queue();
+            }
+            case BUTTON_MEETING_END -> {
+                event.deferReply(true).queue();
+                handleMeetingEnd(event.getGuild(), event.getChannel());
+                event.getHook()
+                        .sendMessage("회의 종료 요청을 처리했어요.")
+                        .setEphemeral(true)
+                        .queue();
+            }
+            default -> {
+                // Other component interactions are intentionally ignored.
+            }
+        }
+    }
+
+    @Override
+    public void onStringSelectInteraction(StringSelectInteractionEvent event) {
+        if (!SELECT_PROJECT.equals(event.getComponentId())) {
+            return;
+        }
+        event.deferReply(true).queue();
+        String selected = event.getValues().isEmpty() ? null : event.getValues().getFirst();
+        if (selected == null) {
+            event.getHook().sendMessage("선택된 프로젝트가 없어요.").setEphemeral(true).queue();
+            return;
+        }
+
+        try {
+            long projectId = Long.parseLong(selected);
+            JsonNode project = fetchData("/api/v1/projects/" + projectId, "프로젝트 상세 조회");
+            if (project == null) {
+                event.getHook()
+                        .sendMessage("프로젝트 정보를 가져오지 못했어요.")
+                        .setEphemeral(true)
+                        .queue();
+                return;
+            }
+            sendProjectDashboard(event, project, "선택한 프로젝트 대시보드예요.");
+        } catch (NumberFormatException exception) {
+            event.getHook()
+                    .sendMessage("프로젝트 선택값이 올바르지 않아요.")
+                    .setEphemeral(true)
+                    .queue();
+        }
+    }
+
+    @Override
+    public void onModalInteraction(ModalInteractionEvent event) {
+        if (!MODAL_PROJECT_CREATE.equals(event.getModalId())) {
+            return;
+        }
+
+        event.deferReply(true).queue();
+        JsonNode project = createProjectFromModal(event);
+        if (project == null) {
+            event.getHook()
+                    .sendMessage("프로젝트 생성에 실패했어요. 입력값이나 서버 로그를 확인해주세요.")
+                    .setEphemeral(true)
+                    .queue();
+            return;
+        }
+
+        sendProjectDashboard(event, project, "프로젝트를 생성했어요.");
+    }
+
+    private void sendPanelLauncher(MessageChannel channel) {
+        channel.sendMessage("Flodi 개인 패널을 열어볼게요.")
+                .setComponents(ActionRow.of(Button.secondary(BUTTON_PANEL_OPEN, "개인 패널 열기")))
+                .queue(message -> queueDelete(message, TEMPORARY_MESSAGE_SECONDS));
+    }
+
+    private EmbedBuilder buildFlodiPanelEmbed() {
+        return new EmbedBuilder()
+                .setColor(FLODI_COLOR)
+                .setTitle("Flodi 회의 패널")
+                .setDescription("이 패널은 누른 사람에게만 보이는 개인 조작판이에요.")
+                .addField("대시보드", "현재 채널의 프로젝트, 회의, 음성 연결 상태를 한 번에 확인해요.", false)
+                .addField("회의", "음성 채널에 들어간 뒤 회의를 시작하면 STT 기록이 저장돼요.", false);
+    }
+
+    private List<ActionRow> buildFlodiPanelComponents() {
+        return List.of(
+                ActionRow.of(
+                        Button.secondary(BUTTON_DASHBOARD_VIEW, "대시보드"),
+                        Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")),
+                ActionRow.of(
+                        Button.primary(BUTTON_MEETING_START, "회의 시작"), Button.danger(BUTTON_MEETING_END, "회의 종료")));
+    }
+
+    private void handleMeetingStartButton(ButtonInteractionEvent event) {
+        Member member = event.getMember();
+        if (member == null
+                || member.getVoiceState() == null
+                || member.getVoiceState().getChannel() == null) {
+            event.reply("먼저 음성 채널에 들어가줘.").setEphemeral(true).queue();
+            return;
+        }
+
+        event.deferReply(true).queue();
+        long channelId = event.getChannel().getIdLong();
+        MeetingStartContext ctx = new MeetingStartContext(
+                event.getGuild().getIdLong(),
+                event.getGuild().getName(),
+                member.getVoiceState().getChannel(),
+                event.getChannel(),
+                event.getGuild().getAudioManager(),
+                event.getGuild(),
+                channelId);
+
+        Long projectId = fetchProjectIdByChannel(channelId);
+        if (projectId != null) {
+            new Thread(() -> startMeeting(ctx, projectId)).start();
+            event.getHook().sendMessage("회의 시작 요청을 처리했어요.").setEphemeral(true).queue();
+            return;
+        }
+
+        pendingMeetingConfirmations.put(channelId, new MeetingConfirmationState(ctx, System.currentTimeMillis()));
+        event.getHook()
+                .sendMessageEmbeds(new EmbedBuilder()
+                        .setColor(Color.ORANGE)
+                        .setTitle("연결된 프로젝트가 없어요")
+                        .setDescription("이 채널에 연결된 프로젝트가 없어서 회의가 프로젝트에 저장되지 않아요.")
+                        .build())
+                .setComponents(ActionRow.of(
+                        Button.secondary(BUTTON_MEETING_START_WITHOUT_PROJECT, "프로젝트 없이 시작"),
+                        Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성"),
+                        Button.secondary(BUTTON_MEETING_CANCEL, "취소")))
+                .setEphemeral(true)
+                .queue();
+    }
+
+    private void handleMeetingStartWithoutProjectButton(ButtonInteractionEvent event) {
+        event.deferReply(true).queue();
+        long channelId = event.getChannel().getIdLong();
+        MeetingConfirmationState state = pendingMeetingConfirmations.remove(channelId);
+        if (state == null || System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
+            event.getHook()
+                    .sendMessage("회의 시작 확인이 만료됐어요. 다시 `!flodi`에서 회의 시작을 눌러주세요.")
+                    .setEphemeral(true)
+                    .queue();
+            return;
+        }
+
+        new Thread(() -> startMeeting(state.ctx(), null)).start();
+        event.getHook().sendMessage("프로젝트 없이 회의를 시작할게요.").setEphemeral(true).queue();
+    }
+
+    private void showDashboard(ButtonInteractionEvent event) {
+        JsonNode connectedProject =
+                fetchData("/api/v1/projects/channel/" + event.getChannel().getId(), "채널 프로젝트 조회");
+        if (connectedProject != null) {
+            sendProjectDashboard(event, connectedProject, "현재 채널 대시보드예요.");
+            return;
+        }
+
+        JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
+        List<ActionRow> components = new ArrayList<>();
+        components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
+        if (projects != null && projects.isArray() && !projects.isEmpty()) {
+            components.add(ActionRow.of(buildProjectSelectMenu(projects)));
+        }
+
+        event.getHook()
+                .sendMessageEmbeds(buildEmptyDashboardEmbed(event.getGuild()).build())
+                .setComponents(components)
+                .setEphemeral(true)
+                .queue();
+    }
+
+    private void sendProjectDashboard(ButtonInteractionEvent event, JsonNode project, String message) {
+        long projectId = project.path("id").asLong();
+        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        Long connectedProjectId = fetchProjectIdByChannel(event.getChannel().getIdLong());
+        boolean connected = connectedProjectId != null && connectedProjectId == projectId;
+        event.getHook()
+                .sendMessage(message)
+                .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, connected)
+                        .build())
+                .setEphemeral(true)
+                .queue();
+    }
+
+    private void sendProjectDashboard(StringSelectInteractionEvent event, JsonNode project, String message) {
+        long projectId = project.path("id").asLong();
+        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        Long connectedProjectId = fetchProjectIdByChannel(event.getChannel().getIdLong());
+        boolean connected = connectedProjectId != null && connectedProjectId == projectId;
+        event.getHook()
+                .sendMessage(message)
+                .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, connected)
+                        .build())
+                .setEphemeral(true)
+                .queue();
+    }
+
+    private void sendProjectDashboard(ModalInteractionEvent event, JsonNode project, String message) {
+        long projectId = project.path("id").asLong();
+        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        event.getHook()
+                .sendMessage(message)
+                .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, true)
+                        .build())
+                .setEphemeral(true)
+                .queue();
+    }
+
+    private EmbedBuilder buildEmptyDashboardEmbed(Guild guild) {
+        Long activeMeetingId = activeMeetingIdByGuild.get(guild.getIdLong());
+        return new EmbedBuilder()
+                .setColor(FLODI_COLOR)
+                .setTitle("Flodi 대시보드")
+                .setDescription("이 채널에 연결된 프로젝트가 없어요.")
+                .addField("프로젝트", "프로젝트를 생성하거나 기존 프로젝트를 선택할 수 있어요.", false)
+                .addField("활성 회의", activeMeetingId != null ? "meetingId=" + activeMeetingId : "없음", true)
+                .addField("음성 연결", buildVoiceStatus(guild), true);
+    }
+
+    private void showProjectDashboardOrPicker(Guild guild, MessageChannel channel) {
+        JsonNode connectedProject = fetchData("/api/v1/projects/channel/" + channel.getId(), "채널 프로젝트 조회");
+        if (connectedProject != null) {
+            sendProjectDashboard(channel, guild, connectedProject);
+            return;
+        }
+
+        JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
+        List<ActionRow> components = new ArrayList<>();
+        components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
+        if (projects != null && projects.isArray() && !projects.isEmpty()) {
+            components.add(ActionRow.of(buildProjectSelectMenu(projects)));
+        }
+
+        channel.sendMessageEmbeds(new EmbedBuilder()
+                        .setColor(Color.ORANGE)
+                        .setTitle("이 채널에 연결된 프로젝트가 없어요")
+                        .setDescription("새 프로젝트를 만들거나 기존 프로젝트 대시보드를 선택해 확인할 수 있어요.")
+                        .build())
+                .setComponents(components)
+                .queue(message -> queueDelete(message, TEMPORARY_MESSAGE_SECONDS));
+    }
+
+    private void sendProjectDashboard(MessageChannel channel, Guild guild, JsonNode project) {
+        long projectId = project.path("id").asLong();
+        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        Long connectedProjectId = fetchProjectIdByChannel(channel.getIdLong());
+        boolean connected = connectedProjectId != null && connectedProjectId == projectId;
+        channel.sendMessageEmbeds(buildProjectDashboardEmbed(guild, project, decisions, connected)
+                        .build())
+                .queue();
+    }
+
+    private StringSelectMenu buildProjectSelectMenu(JsonNode projects) {
+        List<SelectOption> options = new ArrayList<>();
+        int count = Math.min(projects.size(), PROJECT_SELECT_LIMIT);
+        for (int i = 0; i < count; i++) {
+            JsonNode project = projects.get(i);
+            String id = project.path("id").asText();
+            String name = truncate(textOrDefault(project.path("name"), "이름 없는 프로젝트"), 100);
+            String description = truncate(textOrDefault(project.path("techStack"), "기술 스택 미입력"), 100);
+            options.add(SelectOption.of(name, id).withDescription(description));
+        }
+
+        return StringSelectMenu.create(SELECT_PROJECT)
+                .setPlaceholder("기존 프로젝트 선택")
+                .addOptions(options)
+                .build();
+    }
+
+    private EmbedBuilder buildProjectDashboardEmbed(
+            Guild guild, JsonNode project, JsonNode decisions, boolean connected) {
+        Long activeMeetingId = activeMeetingIdByGuild.get(guild.getIdLong());
+        EmbedBuilder embed = new EmbedBuilder()
+                .setColor(FLODI_COLOR)
+                .setTitle("Flodi 대시보드")
+                .setDescription(textOrDefault(project.path("name"), "이름 없는 프로젝트"))
+                .addField("설명", textOrDefault(project.path("description"), "-"), false)
+                .addField("기술 스택", textOrDefault(project.path("techStack"), "-"), false)
+                .addField("생성일", textOrDefault(project.path("createdAt"), "-"), true)
+                .addField("연결 상태", connected ? "현재 채널에 연결됨" : "다른 채널 또는 미연결", true)
+                .addField("활성 회의", activeMeetingId != null ? "meetingId=" + activeMeetingId : "없음", true)
+                .addField("음성 연결", buildVoiceStatus(guild), true);
+
+        embed.addField("최근 결정사항", formatDecisionPreview(decisions), false);
+        return embed;
+    }
+
+    private Modal buildProjectCreateModal() {
+        TextInput name = TextInput.create(MODAL_PROJECT_NAME, TextInputStyle.SHORT)
+                .setPlaceholder("예: Flodi")
+                .setRequired(true)
+                .setRequiredRange(1, 80)
+                .build();
+        TextInput description = TextInput.create(MODAL_PROJECT_DESCRIPTION, TextInputStyle.PARAGRAPH)
+                .setPlaceholder("프로젝트 설명")
+                .setRequired(false)
+                .setRequiredRange(0, 500)
+                .build();
+        TextInput techStack = TextInput.create(MODAL_PROJECT_TECH_STACK, TextInputStyle.SHORT)
+                .setPlaceholder("예: Spring Boot, PostgreSQL, Discord")
+                .setRequired(false)
+                .setRequiredRange(0, 200)
+                .build();
+
+        return Modal.create(MODAL_PROJECT_CREATE, "프로젝트 생성")
+                .addComponents(Label.of("프로젝트 이름", name), Label.of("설명", description), Label.of("기술 스택", techStack))
+                .build();
+    }
+
+    private JsonNode createProjectFromModal(ModalInteractionEvent event) {
+        String name = modalValue(event, MODAL_PROJECT_NAME);
+        if (name.isBlank()) {
+            return null;
+        }
+
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("name", name);
+        putNullable(body, "description", modalValue(event, MODAL_PROJECT_DESCRIPTION));
+        putNullable(body, "techStack", modalValue(event, MODAL_PROJECT_TECH_STACK));
+        body.putNull("serverId");
+        body.put("channelId", event.getChannel().getId());
+
+        return postData("/api/v1/projects", body, "프로젝트 생성");
+    }
+
+    private String buildStatsMessage(Guild guild) {
+        AudioManager audioManager = guild.getAudioManager();
+        PerUserAudioReceiveHandler handler = receiveHandlers.get(guild.getIdLong());
+        if (handler == null) {
+            return "현재 수신 중인 음성 세션이 없어. 먼저 회의 시작을 눌러줘.";
+        }
+
+        String connectionSummary = "연결 상태: connected="
+                + audioManager.isConnected()
+                + ", status="
+                + audioManager.getConnectionStatus()
+                + ", selfMuted="
+                + audioManager.isSelfMuted()
+                + ", selfDeafened="
+                + audioManager.isSelfDeafened();
+
+        return connectionSummary + "\n" + handler.getStatsSummary();
+    }
+
+    private String buildVoiceStatus(Guild guild) {
+        AudioManager audioManager = guild.getAudioManager();
+        PerUserAudioReceiveHandler handler = receiveHandlers.get(guild.getIdLong());
+        String receiving = handler == null ? "수신 없음" : "수신 중";
+        return "connected="
+                + audioManager.isConnected()
+                + ", status="
+                + audioManager.getConnectionStatus()
+                + ", "
+                + receiving;
+    }
+
+    private JsonNode fetchData(String path, String action) {
+        try {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + path))
+                    .GET();
+            attachInternalApiKey(requestBuilder);
+
+            HttpResponse<String> response =
+                    httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                log.warn("[??API?브퀗?????덉넮] action={}, path={}, status={}", action, path, response.statusCode());
+                return null;
+            }
+
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return null;
+            }
+            return data;
+        } catch (Exception exception) {
+            log.warn("[??API?브퀗?????깅뇶] action={}, path={}", action, path, exception);
+            return null;
+        }
+    }
+
+    private JsonNode postData(String path, ObjectNode body, String action) {
+        try {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + path))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
+            attachInternalApiKey(requestBuilder);
+
+            HttpResponse<String> response =
+                    httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 != 2) {
+                log.warn(
+                        "[??API??諛댁뎽???덉넮] action={}, path={}, status={}, body={}",
+                        action,
+                        path,
+                        response.statusCode(),
+                        response.body());
+                return null;
+            }
+
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            return data.isMissingNode() || data.isNull() ? null : data;
+        } catch (Exception exception) {
+            log.warn("[??API??諛댁뎽???깅뇶] action={}, path={}", action, path, exception);
+            return null;
+        }
+    }
+
+    private String modalValue(ModalInteractionEvent event, String id) {
+        return event.getValues().stream()
+                .filter(value -> id.equals(value.getCustomId()))
+                .findFirst()
+                .map(value -> value.getAsString().trim())
+                .orElse("");
+    }
+
+    private void putNullable(ObjectNode body, String field, String value) {
+        if (value == null || value.isBlank()) {
+            body.putNull(field);
+            return;
+        }
+        body.put(field, value);
+    }
+
+    private String formatDecisionPreview(JsonNode decisions) {
+        if (decisions == null || !decisions.isArray() || decisions.isEmpty()) {
+            return "등록된 결정사항이 없어요.";
+        }
+
+        StringBuilder message = new StringBuilder();
+        int count = Math.min(decisions.size(), DECISION_PREVIEW_LIMIT);
+        for (int i = 0; i < count; i++) {
+            JsonNode decision = decisions.get(i);
+            message.append("- ")
+                    .append(textOrDefault(decision.path("content"), "내용 없음"))
+                    .append("\n");
+        }
+        if (decisions.size() > count) {
+            message.append("- 외 ").append(decisions.size() - count).append("개 더 있음");
+        }
+        return message.toString();
+    }
+
+    private String textOrDefault(JsonNode node, String defaultValue) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return defaultValue;
+        }
+        String value = node.asText();
+        return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength - 3) + "...";
     }
 
     private void handleProjectStart(MessageReceivedEvent event, long channelId) {
@@ -163,7 +681,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         if (System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
             pendingProjectCreations.remove(channelId);
             event.getChannel()
-                    .sendMessage("⏰ 프로젝트 생성 시간이 초과됐습니다. 다시 `!project start`를 입력해주세요.")
+                    .sendMessage("프로젝트 생성 시간이 초과됐습니다. 다시 `!project start`를 입력해주세요.")
                     .queue();
             return;
         }
@@ -204,7 +722,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                         event);
                 if (projectId != null) {
                     event.getChannel()
-                            .sendMessage("✅ 프로젝트 [" + state.name() + "]가 생성됐습니다! (id=" + projectId + ")")
+                            .sendMessage("프로젝트 [" + state.name() + "]가 생성됐습니다! (id=" + projectId + ")")
                             .queue();
                 }
             }
@@ -218,10 +736,10 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
-        // 채널에 연결된 프로젝트가 없으면 확인 요청
+        // 嶺??х몭????⑤슡????熬곣뫁夷??釉띾콦?띠럾? ??怨몃さ嶺??筌먦끉逾???븐슙??
         pendingMeetingConfirmations.put(ctx.channelId(), new MeetingConfirmationState(ctx, System.currentTimeMillis()));
         ctx.textChannel()
-                .sendMessage("⚠️ 이 채널에 연결된 프로젝트가 없어서 회의가 저장되지 않아요.\n" + "그래도 진행하시겠어요? (yes / no)")
+                .sendMessage("이 채널에 연결된 프로젝트가 없어서 회의가 저장되지 않아요.\n" + "그래도 진행하시겠어요? (yes / no)")
                 .queue();
     }
 
@@ -231,7 +749,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         if (System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
             pendingMeetingConfirmations.remove(channelId);
             event.getChannel()
-                    .sendMessage("⏰ 응답 시간이 초과됐습니다. 다시 `!meeting start`를 입력해주세요.")
+                    .sendMessage("응답 시간이 초과됐습니다. 다시 `!meeting start`를 입력해주세요.")
                     .queue();
             return;
         }
@@ -252,8 +770,12 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleMeetingEnd(MessageReceivedEvent event) {
-        long guildId = event.getGuild().getIdLong();
-        AudioManager audioManager = event.getGuild().getAudioManager();
+        handleMeetingEnd(event.getGuild(), event.getChannel());
+    }
+
+    private void handleMeetingEnd(Guild guild, MessageChannel channel) {
+        long guildId = guild.getIdLong();
+        AudioManager audioManager = guild.getAudioManager();
         PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
 
         if (handler != null) {
@@ -266,12 +788,12 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         Long meetingId = activeMeetingIdByGuild.remove(guildId);
         if (meetingId == null) {
-            event.getChannel().sendMessage("진행 중인 회의가 없어요.").queue();
+            sendTemporaryMessage(channel, "진행 중인 회의가 없어요.");
             return;
         }
 
         endMeeting(guildId, meetingId);
-        event.getChannel().sendMessage("✅ 회의가 종료됐습니다. 요약을 생성 중이에요...").queue();
+        channel.sendMessage("회의가 종료됐습니다. 요약을 생성 중이에요...").queue();
         log.info("[미팅/종료명령] guildId={}, meetingId={}", guildId, meetingId);
     }
 
@@ -289,7 +811,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                 return null;
             }
             if (response.statusCode() / 100 != 2) {
-                log.warn("[프로젝트/채널조회실패] channelId={}, status={}", channelId, response.statusCode());
+                log.warn("[?熬곣뫁夷??釉띾콦/嶺??х몭硫??⑥쥙????덉넮] channelId={}, status={}", channelId, response.statusCode());
                 return null;
             }
 
@@ -297,7 +819,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     objectMapper.readTree(response.body()).path("data").path("id");
             return idNode.isNumber() ? idNode.asLong() : null;
         } catch (Exception e) {
-            log.warn("[프로젝트/채널조회예외] channelId={}", channelId, e);
+            log.warn("[?熬곣뫁夷??釉띾콦/嶺??х몭硫??⑥쥙????깅뇶] channelId={}", channelId, e);
             return null;
         }
     }
@@ -305,7 +827,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private void startMeeting(MeetingStartContext ctx, Long projectId) {
         Long meetingId = createMeeting(ctx.guildId(), ctx.guildName(), projectId);
         if (meetingId == null) {
-            ctx.textChannel().sendMessage("❌ 회의 생성 실패. 서버 로그를 확인해줘.").queue();
+            ctx.textChannel().sendMessage("회의 생성 실패. 서버 로그를 확인해주세요.").queue();
             return;
         }
 
@@ -329,7 +851,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         ctx.textChannel()
                 .sendMessage(
-                        "🎙️ 회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
+                        "회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
                 .queue();
         log.info(
                 "[미팅/시작] guildId={}, meetingId={}, projectId={}, channel={}",
@@ -367,12 +889,12 @@ public class DiscordCommandListener extends ListenerAdapter {
 
             if (response.statusCode() / 100 != 2) {
                 log.warn(
-                        "[프로젝트/생성실패] channelId={}, status={}, body={}",
+                        "[?熬곣뫁夷??釉띾콦/??諛댁뎽???덉넮] channelId={}, status={}, body={}",
                         channelId,
                         response.statusCode(),
                         response.body());
                 event.getChannel()
-                        .sendMessage("❌ 프로젝트 생성에 실패했습니다. 서버 로그를 확인해주세요.")
+                        .sendMessage("프로젝트 생성에 실패했습니다. 서버 로그를 확인해주세요.")
                         .queue();
                 return null;
             }
@@ -380,17 +902,17 @@ public class DiscordCommandListener extends ListenerAdapter {
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode idNode = root.path("data").path("id");
             if (!idNode.isNumber()) {
-                log.warn("[프로젝트/생성응답오류] channelId={}, body={}", channelId, response.body());
-                event.getChannel().sendMessage("❌ 프로젝트 생성 응답 오류입니다.").queue();
+                log.warn("[?熬곣뫁夷??釉띾콦/??諛댁뎽??얜Ŧ堉???댁쾼] channelId={}, body={}", channelId, response.body());
+                event.getChannel().sendMessage("프로젝트 생성 응답 오류입니다.").queue();
                 return null;
             }
 
             long projectId = idNode.asLong();
-            log.info("[프로젝트/생성성공] channelId={}, projectId={}", channelId, projectId);
+            log.info("[?熬곣뫁夷??釉띾콦/??諛댁뎽?繹먭퍓沅? channelId={}, projectId={}", channelId, projectId);
             return projectId;
         } catch (Exception e) {
-            log.warn("[프로젝트/생성예외] channelId={}", channelId, e);
-            event.getChannel().sendMessage("❌ 프로젝트 생성 중 오류가 발생했습니다.").queue();
+            log.warn("[?熬곣뫁夷??釉띾콦/??諛댁뎽???깅뇶] channelId={}", channelId, e);
+            event.getChannel().sendMessage("프로젝트 생성 중 오류가 발생했습니다.").queue();
             return null;
         }
     }
@@ -407,7 +929,9 @@ public class DiscordCommandListener extends ListenerAdapter {
         long guildId = event.getGuild().getIdLong();
         Long meetingId = createMeeting(guildId, event.getGuild().getName(), null);
         if (meetingId == null) {
-            event.getChannel().sendMessage("회의 생성 실패로 입장을 중단했어. 서버 로그를 확인해줘.").queue();
+            event.getChannel()
+                    .sendMessage("회의 생성 실패로 입장을 중단했어요. 서버 로그를 확인해주세요.")
+                    .queue();
             return;
         }
 
@@ -419,15 +943,15 @@ public class DiscordCommandListener extends ListenerAdapter {
             existing.closeAllSttSessions();
         }
 
-        // 길드별 핸들러를 1개 유지한다.
-        // (디스코드 특성상 봇 1개는 길드 내 음성 채널 1개 연결만 가능)
+        // ?ル梨띈キ?덊돦??筌뤾퍓援??? 1???????類ｋ펲.
+        // (??븐슜裕?袁⑤?獄??獄??????1?띠룇裕???ル梨띈キ????????嶺??х몭?1????⑤슡?숂춯??띠럾???
         PerUserAudioReceiveHandler handler =
                 new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, meetingId);
         receiveHandlers.put(guildId, handler);
         activeMeetingIdByGuild.put(guildId, meetingId);
         handler.updateCaptionChannel(event.getChannel());
 
-        // 오디오 수신 핸들러 연결 + 음성 연결
+        // ???논꺏????琉용뼁 ?筌뤾퍓援????⑤슡??+ ???????⑤슡??
         audioManager.setReceivingHandler(handler);
         audioManager.setConnectionListener(
                 new LoggingConnectionListener(event.getGuild().getIdLong(), targetChannel));
@@ -441,7 +965,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                         + targetChannel.getName()
                         + " | 현재상태="
                         + audioManager.getConnectionStatus()
-                        + " (오디오 연결은 비동기로 진행됨)"
+                        + " (오디오 연결은 비동기로 진행됨"
                         + ", connected="
                         + audioManager.isConnected()
                         + ", selfMuted="
@@ -465,12 +989,12 @@ public class DiscordCommandListener extends ListenerAdapter {
         AudioManager audioManager = event.getGuild().getAudioManager();
         PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
 
-        // leave 시점에는 열린 STT 세션을 먼저 commit/end로 닫는다.
+        // leave ??戮곗젍???裕??????STT ?筌뤾쑬????誘る닔? commit/end?????ル츎??
         if (handler != null) {
             handler.closeAllSttSessions();
         }
 
-        // 디스코드 음성 연결 종료 + 핸들러 해제
+        // ??븐슜裕?袁⑤?獄????????⑤슡????リ턁筌?+ ?筌뤾퍓援????怨몄젷
         audioManager.closeAudioConnection();
         audioManager.setReceivingHandler(null);
         audioManager.setConnectionListener(null);
@@ -485,26 +1009,15 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleStats(MessageReceivedEvent event) {
-        AudioManager audioManager = event.getGuild().getAudioManager();
-        PerUserAudioReceiveHandler handler =
-                receiveHandlers.get(event.getGuild().getIdLong());
-        if (handler == null) {
-            event.getChannel().sendMessage("현재 수신 중인 음성 세션이 없어. 먼저 !join 해줘.").queue();
-            return;
-        }
+        sendTemporaryMessage(event.getChannel(), buildStatsMessage(event.getGuild()));
+    }
 
-        String connectionSummary = "연결 상태: connected="
-                + audioManager.isConnected()
-                + ", status="
-                + audioManager.getConnectionStatus()
-                + ", selfMuted="
-                + audioManager.isSelfMuted()
-                + ", selfDeafened="
-                + audioManager.isSelfDeafened();
+    private void sendTemporaryMessage(MessageChannel channel, String content) {
+        channel.sendMessage(content).queue(message -> queueDelete(message, TEMPORARY_MESSAGE_SECONDS));
+    }
 
-        event.getChannel()
-                .sendMessage(connectionSummary + "\n" + handler.getStatsSummary())
-                .queue();
+    private void queueDelete(Message message, long seconds) {
+        message.delete().queueAfter(seconds, TimeUnit.SECONDS, null, ignored -> {});
     }
 
     private String summarizeVoiceMembers(AudioChannel channel) {
