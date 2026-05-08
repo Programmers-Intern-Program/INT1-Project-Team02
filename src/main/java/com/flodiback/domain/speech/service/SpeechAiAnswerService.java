@@ -24,7 +24,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SpeechAiAnswerService {
 
-    private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
+    private static final List<String> WAKE_WORDS =
+            List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "플로드야", "flodiya", "plodiya");
     private static final Pattern LEADING_PUNCTUATION = Pattern.compile("^[\\s,，.。?？!！:：;；-]+");
     private static final String SYSTEM_PROMPT = """
             너는 Discord 회의에 참여하는 AI 회의 보조자야.
