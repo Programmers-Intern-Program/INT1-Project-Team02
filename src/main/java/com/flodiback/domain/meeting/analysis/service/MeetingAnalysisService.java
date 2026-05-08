@@ -1,10 +1,20 @@
 package com.flodiback.domain.meeting.analysis.service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
@@ -12,6 +22,7 @@ import com.flodiback.domain.meeting.analysis.dto.DecisionItem;
 import com.flodiback.domain.meeting.analysis.dto.WorkLogItem;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.ContextCacheRepository;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
@@ -23,29 +34,25 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class MeetingAnalysisService {
 
-    private static final String SYSTEM_PROMPT = """
-            당신은 회의 내용을 분석하는 어시스턴트입니다.
-            아래 회의 내용을 분석해서 반드시 다음 JSON 형식으로만 응답하세요.
-            마크다운 코드블록 없이 순수 JSON만 반환하세요.
-            {
-              "summary": "전체 회의 요약",
-              "unresolvedItems": "미결 사항 (없으면 null)",
-              "worklogs": [
-                { "assigneeName": "담당자 이름", "task": "작업 내용", "dueDate": "YYYY-MM-DD" }
-              ],
-              "decisions": [
-                { "content": "결정 내용" }
-              ]
-            }
-            dueDate는 날짜가 있으면 "YYYY-MM-DD" 문자열로, 없으면 따옴표 없는 null로 반환하세요.
-            """;
+    @Value("classpath:prompts/meeting-analysis-system.md")
+    private Resource systemPromptResource;
+
+    private String systemPrompt;
+
+    @PostConstruct
+    private void loadPrompt() throws IOException {
+        this.systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+    }
 
     private final MeetingRepository meetingRepository;
     private final ContextCacheRepository contextCacheRepository;
@@ -54,8 +61,18 @@ public class MeetingAnalysisService {
     private final GlmClient glmClient;
     private final ObjectMapper objectMapper;
 
+    @Async("analysisExecutor")
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleMeetingEnded(MeetingEndedEvent event) {
+        try {
+            analyze(event.meetingId());
+        } catch (Exception e) {
+            log.warn("회의 분석 실패 - meetingId={}: {}", event.meetingId(), e.getMessage());
+        }
+    }
+
     public void analyze(Long meetingId) {
-        // 1. 회의 조회
         Meeting meeting =
                 meetingRepository.findById(meetingId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
         Project project = meeting.getProject();
@@ -63,13 +80,9 @@ public class MeetingAnalysisService {
             throw new ServiceException("400-1", "회의에 연결된 프로젝트가 없습니다.");
         }
 
-        // 2. 컨텍스트 구성
         String context = buildContext(meeting);
-
-        // 3. GLM 호출 및 응답 파싱
         AnalysisResult result = callGlm(context);
 
-        // 4. 분석 결과를 통합 컨텍스트 저장 경로로 전달
         contextService.updateContext(project.getId(), toUpdateContextRequest(meeting.getId(), result));
     }
 
@@ -89,27 +102,38 @@ public class MeetingAnalysisService {
     }
 
     private String buildContext(Meeting meeting) {
-        List<ContextCache> caches = contextCacheRepository.findByMeetingOrderByCreatedAtAsc(meeting);
-        List<Utterance> utterances = utteranceRepository.findByMeetingOrderBySpokenAtAsc(meeting);
+        ContextCache latestCache = contextCacheRepository
+                .findTopByMeetingOrderByVersionDesc(meeting)
+                .orElse(null);
+        List<Utterance> utterances = latestCache == null
+                ? utteranceRepository.findByMeetingOrderByIdAsc(meeting)
+                : utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
+                        meeting, latestCache.getCompressedUntilUtteranceId());
 
         StringBuilder sb = new StringBuilder();
-
-        if (!caches.isEmpty()) {
-            sb.append("[이전 대화 요약]\n");
-            caches.forEach(cache -> sb.append(cache.getCompressedText()).append("\n"));
-            sb.append("\n");
+        if (latestCache != null) {
+            sb.append("[현재 회의 rolling summary]\n");
+            sb.append(latestCache.getCompressedText()).append("\n\n");
         }
 
-        sb.append("[회의 대화 내용]\n");
-        utterances.forEach(u -> sb.append(String.format("%s: %s\n", u.getSpeakerName(), u.getContent())));
+        sb.append(latestCache != null ? "[rolling summary에 아직 반영되지 않은 발화]\n" : "[회의 전체 내용]\n");
+        sortForPrompt(utterances)
+                .forEach(u -> sb.append(String.format("%s: %s\n", u.getSpeakerName(), u.getContent())));
 
         return sb.toString();
     }
 
-    private AnalysisResult callGlm(String context) {
-        String raw = glmClient.chat(SYSTEM_PROMPT, context);
+    private List<Utterance> sortForPrompt(List<Utterance> utterances) {
+        return utterances.stream()
+                .sorted(Comparator.comparing(
+                                Utterance::getSpeechStartedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Utterance::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
 
-        // GLM이 마크다운 코드블록으로 감쌀 경우 제거
+    private AnalysisResult callGlm(String context) {
+        String prompt = systemPrompt.replace("{today}", LocalDate.now().toString());
+        String raw = glmClient.chat(prompt, context);
         String json = raw.strip()
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")

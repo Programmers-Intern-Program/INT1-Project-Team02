@@ -1,18 +1,10 @@
 package com.flodiback.domain.speech.service;
 
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
-import com.flodiback.domain.meeting.meeting.entity.Meeting;
-import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
-import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
-import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
-import com.flodiback.domain.meeting.meetinglog.rolling.UtteranceSavedEvent;
 import com.flodiback.domain.speech.dto.InternalSpeechRequest;
 import com.flodiback.domain.speech.dto.InternalSpeechResponse;
-import com.flodiback.global.exception.ServiceException;
+import com.flodiback.domain.speech.dto.SavedSpeechResult;
 
 import lombok.RequiredArgsConstructor;
 
@@ -20,48 +12,15 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class InternalSpeechService {
 
-    private final MeetingRepository meetingRepository;
-    private final UtteranceRepository utteranceRepository;
+    private final SpeechPersistenceService speechPersistenceService;
     private final SpeechAiAnswerService speechAiAnswerService;
-    private final ApplicationEventPublisher eventPublisher;
 
-    @Transactional
     public InternalSpeechResponse saveSpeech(InternalSpeechRequest request) {
-        // 발화는 반드시 기존 회의에 연결되어야 하므로 회의를 먼저 조회한다.
-        Meeting meeting = meetingRepository
-                .findById(request.meetingId())
-                .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
+        SavedSpeechResult savedSpeech = speechPersistenceService.saveUtterance(request);
 
-        // 동시 요청이 들어오면 같은 sequenceNo가 배정될 수 있다.
-        // 현재는 단일 봇 환경이므로 허용하지만, 멀티 봇/고부하 환경에서는 DB 시퀀스나 낙관적 락으로 교체해야 한다.
-        long sequenceNo = utteranceRepository.countByMeeting(meeting) + 1;
+        // DB 저장 트랜잭션이 끝난 뒤 GLM을 호출해 DB 커넥션을 오래 잡지 않게 합니다.
+        String aiAnswer = speechAiAnswerService.generateAnswerIfCalled(savedSpeech.meetingId(), request.text());
 
-        // Discord 봇이 넘긴 발화 시각을 spoken_at으로 저장한다.
-        int tokenCount = estimateTokenCount(request.text());
-        Utterance utterance = Utterance.builder()
-                .meeting(meeting)
-                .speakerDiscordId(request.speakerDiscordId())
-                .speakerName(request.speakerName())
-                .content(request.text())
-                .spokenAt(request.timestamp())
-                .sequenceNo(sequenceNo)
-                .tokenCount(tokenCount)
-                .build();
-
-        Utterance savedUtterance = utteranceRepository.save(utterance);
-        eventPublisher.publishEvent(
-                new UtteranceSavedEvent(meeting.getId(), savedUtterance.getId(), sequenceNo, tokenCount));
-
-        // 호출어가 있는 발화라면 회의 컨텍스트와 GLM을 사용해 봇이 출력할 답변을 만든다.
-        String aiAnswer = speechAiAnswerService.generateAnswerIfCalled(meeting.getId(), request.text());
-
-        return new InternalSpeechResponse(savedUtterance.getId(), meeting.getId(), aiAnswer);
-    }
-
-    private int estimateTokenCount(String text) {
-        if (!StringUtils.hasText(text)) {
-            return 0;
-        }
-        return Math.max(1, text.length() / 4);
+        return new InternalSpeechResponse(savedSpeech.utteranceId(), savedSpeech.meetingId(), aiAnswer);
     }
 }

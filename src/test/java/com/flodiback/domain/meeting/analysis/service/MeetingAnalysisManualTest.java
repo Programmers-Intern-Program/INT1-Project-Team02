@@ -1,6 +1,7 @@
 package com.flodiback.domain.meeting.analysis.service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -12,7 +13,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.Resource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
@@ -35,23 +38,11 @@ class MeetingAnalysisManualTest {
     @Autowired
     private GlmClient glmClient;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    private ObjectMapper objectMapper;
 
-    private static final String SYSTEM_PROMPT = """
-            당신은 회의 내용을 분석하는 어시스턴트입니다.
-            아래 회의 내용을 분석해서 반드시 다음 JSON 형식으로만 응답하세요.
-            마크다운 코드블록 없이 순수 JSON만 반환하세요.
-            {
-              "summary": "전체 회의 요약",
-              "unresolvedItems": "미결 사항 (없으면 null)",
-              "worklogs": [
-                { "assigneeName": "담당자 이름", "task": "작업 내용", "dueDate": "YYYY-MM-DD 또는 null" }
-              ],
-              "decisions": [
-                { "content": "결정 내용" }
-              ]
-            }
-            """;
+    @Value("classpath:prompts/meeting-analysis-system.md")
+    private Resource systemPromptResource;
 
     // 샘플 추가 시 이 맵에 한 줄 추가
     private static final Map<String, String> SAMPLES = Map.of("스프린트 회의", """
@@ -80,7 +71,8 @@ class MeetingAnalysisManualTest {
     @ParameterizedTest(name = "[{0}]")
     @MethodSource("sampleProvider")
     void 회의록_분석(String label, String transcript) throws Exception {
-        String raw = glmClient.chat(SYSTEM_PROMPT, transcript);
+        String systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+        String raw = glmClient.chat(systemPrompt, transcript);
 
         // 서비스 로직과 동일한 마크다운 코드블록 제거
         String json = raw.strip()

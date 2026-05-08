@@ -38,11 +38,11 @@ public class Utterance {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    @Column(name = "spoken_at", nullable = false)
-    private LocalDateTime spokenAt;
+    @Column(name = "speech_started_at", nullable = false)
+    private LocalDateTime speechStartedAt;
 
-    @Column(name = "sequence_no", nullable = false)
-    private Long sequenceNo;
+    @Column(name = "speech_ended_at")
+    private LocalDateTime speechEndedAt;
 
     @Column(name = "token_count")
     private Integer tokenCount;
@@ -58,8 +58,8 @@ public class Utterance {
             String speakerDiscordId,
             String speakerType,
             String content,
-            LocalDateTime spokenAt,
-            Long sequenceNo,
+            LocalDateTime speechStartedAt,
+            LocalDateTime speechEndedAt,
             Integer tokenCount,
             LocalDateTime createdAt) {
         this.meeting = meeting;
@@ -67,8 +67,8 @@ public class Utterance {
         this.speakerDiscordId = speakerDiscordId;
         this.speakerType = speakerType != null ? speakerType : "HUMAN";
         this.content = content;
-        this.spokenAt = spokenAt != null ? spokenAt : LocalDateTime.now();
-        this.sequenceNo = sequenceNo;
+        this.speechStartedAt = speechStartedAt != null ? speechStartedAt : LocalDateTime.now();
+        this.speechEndedAt = speechEndedAt;
         this.tokenCount = tokenCount;
         this.createdAt = createdAt;
     }

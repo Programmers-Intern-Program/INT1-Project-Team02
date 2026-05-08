@@ -1,89 +1,88 @@
 package com.flodiback.domain.speech.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.transaction.annotation.Transactional;
 
-import com.flodiback.domain.meeting.meeting.entity.Meeting;
-import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
-import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
-import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
-import com.flodiback.domain.meeting.meetinglog.rolling.UtteranceSavedEvent;
 import com.flodiback.domain.speech.dto.InternalSpeechRequest;
+import com.flodiback.domain.speech.dto.InternalSpeechResponse;
+import com.flodiback.domain.speech.dto.SavedSpeechResult;
 
 @ExtendWith(MockitoExtension.class)
 class InternalSpeechServiceTest {
 
     @Mock
-    private MeetingRepository meetingRepository;
-
-    @Mock
-    private UtteranceRepository utteranceRepository;
+    private SpeechPersistenceService speechPersistenceService;
 
     @Mock
     private SpeechAiAnswerService speechAiAnswerService;
-
-    @Mock
-    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private InternalSpeechService internalSpeechService;
 
     @Test
-    void saveSpeech_발화저장시_tokenCount와_event를_생성() {
-        Meeting meeting = org.mockito.Mockito.mock(Meeting.class);
-        given(meeting.getId()).willReturn(1L);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.countByMeeting(meeting)).willReturn(0L);
-        Utterance savedUtterance = org.mockito.Mockito.mock(Utterance.class);
-        given(savedUtterance.getId()).willReturn(100L);
-        given(utteranceRepository.save(any(Utterance.class))).willReturn(savedUtterance);
+    void saveSpeech_returnsAiAnswerAfterSpeechIsPersisted() {
+        InternalSpeechRequest request = request("AI야, 인증 방식 뭐로 정했어?");
+        given(speechPersistenceService.saveUtterance(request)).willReturn(new SavedSpeechResult(100L, 1L));
+        given(speechAiAnswerService.generateAnswerIfCalled(1L, request.text())).willReturn("인증 방식은 JWT로 정했습니다.");
 
-        InternalSpeechRequest request = new InternalSpeechRequest(
-                1L, "discord-1", "김철수", "12345678901234567890", LocalDateTime.of(2026, 5, 3, 10, 0));
+        InternalSpeechResponse response = internalSpeechService.saveSpeech(request);
 
-        internalSpeechService.saveSpeech(request);
+        assertThat(response.utteranceId()).isEqualTo(100L);
+        assertThat(response.meetingId()).isEqualTo(1L);
+        assertThat(response.aiAnswer()).isEqualTo("인증 방식은 JWT로 정했습니다.");
 
-        ArgumentCaptor<Utterance> utteranceCaptor = ArgumentCaptor.forClass(Utterance.class);
-        verify(utteranceRepository).save(utteranceCaptor.capture());
-        assertThat(utteranceCaptor.getValue().getTokenCount()).isEqualTo(5);
-
-        ArgumentCaptor<UtteranceSavedEvent> eventCaptor = ArgumentCaptor.forClass(UtteranceSavedEvent.class);
-        verify(eventPublisher).publishEvent(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().meetingId()).isEqualTo(1L);
-        assertThat(eventCaptor.getValue().utteranceId()).isEqualTo(100L);
-        assertThat(eventCaptor.getValue().sequenceNo()).isEqualTo(1L);
-        assertThat(eventCaptor.getValue().tokenCount()).isEqualTo(5);
+        InOrder inOrder = inOrder(speechPersistenceService, speechAiAnswerService);
+        inOrder.verify(speechPersistenceService).saveUtterance(request);
+        inOrder.verify(speechAiAnswerService).generateAnswerIfCalled(1L, request.text());
     }
 
     @Test
-    void saveSpeech_blankText는_tokenCount_0() {
-        Meeting meeting = org.mockito.Mockito.mock(Meeting.class);
-        given(meeting.getId()).willReturn(1L);
-        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        Utterance savedUtterance = org.mockito.Mockito.mock(Utterance.class);
-        given(savedUtterance.getId()).willReturn(100L);
-        given(utteranceRepository.save(any(Utterance.class))).willReturn(savedUtterance);
+    void saveSpeech_keepsSavedSpeechResponseWhenAiAnswerIsNull() {
+        InternalSpeechRequest request = request("이번 회의 목표를 정해봅시다.");
+        given(speechPersistenceService.saveUtterance(request)).willReturn(new SavedSpeechResult(101L, 1L));
 
-        InternalSpeechRequest request =
-                new InternalSpeechRequest(1L, "discord-1", "김철수", " ", LocalDateTime.of(2026, 5, 3, 10, 0));
+        InternalSpeechResponse response = internalSpeechService.saveSpeech(request);
 
-        internalSpeechService.saveSpeech(request);
+        assertThat(response.utteranceId()).isEqualTo(101L);
+        assertThat(response.meetingId()).isEqualTo(1L);
+        assertThat(response.aiAnswer()).isNull();
+        verify(speechAiAnswerService).generateAnswerIfCalled(1L, request.text());
+    }
 
-        ArgumentCaptor<Utterance> utteranceCaptor = ArgumentCaptor.forClass(Utterance.class);
-        verify(utteranceRepository).save(utteranceCaptor.capture());
-        assertThat(utteranceCaptor.getValue().getTokenCount()).isZero();
+    @Test
+    void saveSpeech_doesNotOwnTransactionBoundary() throws NoSuchMethodException {
+        Method saveSpeech = InternalSpeechService.class.getMethod("saveSpeech", InternalSpeechRequest.class);
+        Method saveUtterance = SpeechPersistenceService.class.getMethod("saveUtterance", InternalSpeechRequest.class);
+
+        assertThat(AnnotatedElementUtils.hasAnnotation(InternalSpeechService.class, Transactional.class))
+                .isFalse();
+        assertThat(AnnotatedElementUtils.hasAnnotation(saveSpeech, Transactional.class))
+                .isFalse();
+        assertThat(AnnotatedElementUtils.hasAnnotation(saveUtterance, Transactional.class))
+                .isTrue();
+    }
+
+    private InternalSpeechRequest request(String text) {
+        return new InternalSpeechRequest(
+                1L,
+                "discord-1",
+                "김철수",
+                text,
+                LocalDateTime.of(2026, 5, 3, 10, 0),
+                LocalDateTime.of(2026, 5, 3, 10, 0, 5));
     }
 }

@@ -15,11 +15,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.MeetingDetailResponse;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
@@ -36,6 +38,9 @@ class MeetingServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     // ─── create ───────────────────────────────────────────
 
@@ -54,6 +59,7 @@ class MeetingServiceTest {
         assertThat(response.projectId()).isNull();
         assertThat(response.title()).isEqualTo("테스트 회의");
         assertThat(response.status()).isEqualTo(MeetingStatus.IN_PROGRESS);
+        assertThat(response.projectConnected()).isFalse();
     }
 
     @Test
@@ -72,6 +78,7 @@ class MeetingServiceTest {
         verify(meetingRepository).save(any(Meeting.class));
         assertThat(response.title()).isEqualTo("테스트 회의");
         assertThat(response.status()).isEqualTo(MeetingStatus.IN_PROGRESS);
+        assertThat(response.projectConnected()).isTrue();
     }
 
     @Test
@@ -133,6 +140,31 @@ class MeetingServiceTest {
                 .hasMessage("존재하지 않는 회의입니다.");
 
         verify(meetingRepository, never()).save(any());
+    }
+
+    @Test
+    void end_유효한_id면_MeetingEndedEvent_발행() {
+        // given
+        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        meetingService.end(1L);
+
+        // then
+        verify(eventPublisher).publishEvent(any(MeetingEndedEvent.class));
+    }
+
+    @Test
+    void end_존재하지않는_id면_이벤트_미발행() {
+        // given
+        given(meetingRepository.findById(999L)).willReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> meetingService.end(999L)).isInstanceOf(NoSuchElementException.class);
+
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     // ─── getById ──────────────────────────────────────────

@@ -2,6 +2,7 @@ package com.flodiback.domain.meeting.meeting.service;
 
 import java.util.NoSuchElementException;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -9,6 +10,7 @@ import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.MeetingDetailResponse;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
@@ -22,6 +24,7 @@ public class MeetingService {
 
     private final MeetingRepository meetingRepository;
     private final ProjectRepository projectRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public CreateMeetingResponse create(CreateMeetingRequest req) {
         Project project = null;
@@ -39,7 +42,8 @@ public class MeetingService {
                 project != null ? project.getId() : null,
                 meeting.getTitle(),
                 meeting.getStartedAt(),
-                meeting.getStatus());
+                meeting.getStatus(),
+                project != null);
     }
 
     public MeetingDetailResponse end(Long id) {
@@ -49,6 +53,7 @@ public class MeetingService {
         meeting.end();
         meetingRepository.save(meeting);
 
+        eventPublisher.publishEvent(new MeetingEndedEvent(meeting.getId()));
         return toDetailResponse(meeting);
     }
 

@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.type.SqlTypes;
 
 import com.flodiback.domain.server.server.entity.DiscordServer;
@@ -16,6 +18,8 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Table(name = "projects")
+@SQLDelete(sql = "UPDATE projects SET deleted_at = now() WHERE id = ?")
+@SQLRestriction("deleted_at IS NULL")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Project {
@@ -28,6 +32,9 @@ public class Project {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "server_id", nullable = true)
     private DiscordServer server;
+
+    @Column(name = "channel_id", length = 50)
+    private String channelId;
 
     @Column(name = "name", nullable = false, length = 100)
     private String name;
@@ -46,9 +53,29 @@ public class Project {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    public void update(String name, String description, String techStack) {
+        if (name != null) this.name = name;
+        if (description != null) this.description = description;
+        if (techStack != null) this.techStack = techStack;
+    }
+
+    public void softDelete() {
+        this.deletedAt = LocalDateTime.now();
+    }
+
     @Builder
-    public Project(DiscordServer server, String name, String description, String techStack, String metadata) {
+    public Project(
+            DiscordServer server,
+            String channelId,
+            String name,
+            String description,
+            String techStack,
+            String metadata) {
         this.server = server;
+        this.channelId = channelId;
         this.name = name;
         this.description = description;
         this.techStack = techStack;

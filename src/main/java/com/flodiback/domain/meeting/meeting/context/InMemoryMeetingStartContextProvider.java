@@ -11,8 +11,10 @@ import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.meeting.meetinglog.dto.DecisionSummary;
 import com.flodiback.domain.meeting.meetinglog.dto.PastSummary;
+import com.flodiback.domain.meeting.meetinglog.dto.WorkLogSummary;
 import com.flodiback.domain.meeting.meetinglog.repository.MeetingSummaryRepository;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -21,12 +23,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class InMemoryMeetingStartContextProvider implements MeetingStartContextProvider {
 
-    private static final int START_CONTEXT_LIMIT = 5;
+    private static final int RECENT_SUMMARY_LIMIT = 3;
+    private static final String ACTIVE_WORKLOG_STATUS = "TODO";
 
     private final ConcurrentHashMap<Long, MeetingStartContext> cache = new ConcurrentHashMap<>();
     private final MeetingRepository meetingRepository;
     private final DecisionRepository decisionRepository;
     private final MeetingSummaryRepository meetingSummaryRepository;
+    private final WorkLogRepository workLogRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -45,7 +49,7 @@ public class InMemoryMeetingStartContextProvider implements MeetingStartContextP
                 .orElseThrow(() -> new ServiceException("404-1", "회의를 찾을 수 없습니다."));
         Project project = meeting.getProject();
         if (project == null) {
-            return MeetingStartContext.noProject();
+            return MeetingStartContext.noProject(meetingId);
         }
 
         List<DecisionSummary> recentDecisions =
@@ -56,12 +60,31 @@ public class InMemoryMeetingStartContextProvider implements MeetingStartContextP
                         .toList();
         List<PastSummary> recentSummaries =
                 meetingSummaryRepository
-                        .findLatestPastByProjectId(project.getId(), meetingId, START_CONTEXT_LIMIT)
+                        .findLatestPastByProjectId(project.getId(), meetingId, RECENT_SUMMARY_LIMIT)
                         .stream()
                         .map(PastSummary::from)
                         .toList();
+        String unresolvedItems = meetingSummaryRepository
+                .findLatestUnresolvedItemsByProjectId(project.getId(), meetingId)
+                .orElse(null);
+        List<WorkLogSummary> activeWorkLogs =
+                workLogRepository
+                        .findTop5ByProjectIdAndStatusOrderByIdDesc(project.getId(), ACTIVE_WORKLOG_STATUS)
+                        .stream()
+                        .sorted(java.util.Comparator.comparing(
+                                com.flodiback.domain.project.worklog.entity.WorkLog::getId))
+                        .map(WorkLogSummary::from)
+                        .toList();
 
         return new MeetingStartContext(
-                project.getName(), project.getTechStack(), project.getMetadata(), recentDecisions, recentSummaries);
+                meetingId,
+                project.getId(),
+                project.getName(),
+                project.getTechStack(),
+                project.getMetadata(),
+                recentDecisions,
+                recentSummaries,
+                unresolvedItems,
+                activeWorkLogs);
     }
 }
