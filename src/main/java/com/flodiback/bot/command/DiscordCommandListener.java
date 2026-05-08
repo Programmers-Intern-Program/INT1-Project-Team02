@@ -49,9 +49,9 @@ import net.dv8tion.jda.api.managers.AudioManager;
 import net.dv8tion.jda.api.modals.Modal;
 
 /**
- * Discord ???⑸츩??嶺뚮ㅏ援앲??嶺뚳퐣瑗???洹먮봾裕??
+ * Discord 텍스트 명령과 컴포넌트 인터랙션을 처리하는 리스너.
  *
- * <p>?熬곣뫗??嶺뚯솘???嶺뚮ㅏ援앲??
+ * <p>현재 지원 명령:
  * - !ping
  * - !join
  * - !leave
@@ -98,23 +98,22 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record MeetingConfirmationState(MeetingStartContext ctx, long createdAt) {}
 
-    // 嶺뚮ㅏ援앲?????얜Ŧ????? !)
+    // 명령어 접두사. 기본값은 !.
     private final String prefix;
-    // ???깆젷 STT ??븐슦異???뚮뿭寃긺춯??熬곣뫗??OpenAI)
+    // 실제 STT 엔진 구현체. 현재 기본값은 OpenAI.
     private final SttProvider sttProvider;
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String internalBaseUrl;
     private final String internalApiKey;
-    // ?ル梨띈キ?덊돦????논꺏????琉용뼁 ?筌뤾퍓援??嶺?흮??
+    // 길드별 오디오 수신 핸들러 캐시
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
-    // ?ル梨띈キ?덊돦???戮?뎽 meetingId
+    // 길드별 활성 meetingId
     private final Map<Long, Long> activeMeetingIdByGuild = new ConcurrentHashMap<>();
-    // 嶺??х몭硫깊돦?嶺뚯쉳?듸쭛?繞벿살탳???熬곣뫁夷??釉띾콦 ??諛댁뎽 ??⑤객臾?
+    // 채널별 진행 중인 프로젝트 생성 상태
     private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
-    // 嶺??х몭硫깊돦????踰???戮곗굚 ?筌먦끉逾???????⑤객臾?
+    // 채널별 회의 시작 확인 대기 상태
     private final Map<Long, MeetingConfirmationState> pendingMeetingConfirmations = new ConcurrentHashMap<>();
-    // 嶺??х몭硫깊돦?嶺뚣끉裕??Flodi ???븐꽢 嶺뚮∥???낆??
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -129,20 +128,20 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
-        // ??嶺뚮∥???낆??/DM?? 嶺뚮ㅏ援앲??嶺뚳퐣瑗??????⑤챶?????戮곕뇶
+        // 봇 메시지와 DM은 명령 처리 대상에서 제외
         if (event.getAuthor().isBot() || !event.isFromGuild()) {
             return;
         }
 
         long channelId = event.getChannel().getIdLong();
 
-        // ???踰???戮곗굚 ?筌먦끉逾?????繞벿살탳??嶺??х몭??????誘る닔? 嶺뚳퐣瑗??
+        // 회의 시작 확인 대기 중인 채널이면 먼저 처리
         if (pendingMeetingConfirmations.containsKey(channelId)) {
             handleMeetingConfirmationStep(event, channelId);
             return;
         }
 
-        // ?熬곣뫁夷??釉띾콦 ??諛댁뎽 ????繞벿살탳??嶺??х몭?????嶺뚮ㅏ援앲????????誘る닔? 嶺뚳퐣瑗??
+        // 프로젝트 생성 대화 중인 채널이면 명령보다 먼저 처리
         if (pendingProjectCreations.containsKey(channelId)) {
             handleProjectCreationStep(event, channelId);
             return;
@@ -181,7 +180,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
-                // 亦껋꼶梨???嶺뚮ㅏ援앲??? ?브퀗??????쒕샍??
+                // 알 수 없는 명령은 조용히 무시
             }
         }
     }
@@ -221,7 +220,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                         .queue();
             }
             default -> {
-                // Other component interactions are intentionally ignored.
+                // 다른 컴포넌트 인터랙션은 이 리스너에서 처리하지 않는다.
             }
         }
     }
@@ -736,7 +735,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
-        // 嶺??х몭????⑤슡????熬곣뫁夷??釉띾콦?띠럾? ??怨몃さ嶺??筌먦끉逾???븐슙??
+        // 채널에 연결된 프로젝트가 없으면 텍스트 확인을 요청한다.
         pendingMeetingConfirmations.put(ctx.channelId(), new MeetingConfirmationState(ctx, System.currentTimeMillis()));
         ctx.textChannel()
                 .sendMessage("이 채널에 연결된 프로젝트가 없어서 회의가 저장되지 않아요.\n" + "그래도 진행하시겠어요? (yes / no)")
@@ -943,15 +942,15 @@ public class DiscordCommandListener extends ListenerAdapter {
             existing.closeAllSttSessions();
         }
 
-        // ?ル梨띈キ?덊돦??筌뤾퍓援??? 1???????類ｋ펲.
-        // (??븐슜裕?袁⑤?獄??獄??????1?띠룇裕???ル梨띈キ????????嶺??х몭?1????⑤슡?숂춯??띠럾???
+        // 길드별 핸들러는 하나만 유지한다.
+        // Discord 특성상 봇 하나는 길드 내 음성 채널 하나에만 연결된다.
         PerUserAudioReceiveHandler handler =
                 new PerUserAudioReceiveHandler(guildId, event.getGuild(), sttProvider, meetingId);
         receiveHandlers.put(guildId, handler);
         activeMeetingIdByGuild.put(guildId, meetingId);
         handler.updateCaptionChannel(event.getChannel());
 
-        // ???논꺏????琉용뼁 ?筌뤾퍓援????⑤슡??+ ???????⑤슡??
+        // 오디오 수신 핸들러 연결 및 음성 채널 연결
         audioManager.setReceivingHandler(handler);
         audioManager.setConnectionListener(
                 new LoggingConnectionListener(event.getGuild().getIdLong(), targetChannel));
@@ -989,12 +988,12 @@ public class DiscordCommandListener extends ListenerAdapter {
         AudioManager audioManager = event.getGuild().getAudioManager();
         PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
 
-        // leave ??戮곗젍???裕??????STT ?筌뤾쑬????誘る닔? commit/end?????ル츎??
+        // leave 시점에는 열린 STT 세션을 먼저 commit/end로 닫는다.
         if (handler != null) {
             handler.closeAllSttSessions();
         }
 
-        // ??븐슜裕?袁⑤?獄????????⑤슡????リ턁筌?+ ?筌뤾퍓援????怨몄젷
+        // Discord 음성 연결 종료 및 핸들러 해제
         audioManager.closeAudioConnection();
         audioManager.setReceivingHandler(null);
         audioManager.setConnectionListener(null);
