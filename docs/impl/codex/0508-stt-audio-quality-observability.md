@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: song
+reviewed-at: 2026-05-08
+evidence: PR
 ---
 
 # STT 오디오 품질 관측 보강
