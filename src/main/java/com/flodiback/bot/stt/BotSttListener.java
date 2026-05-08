@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,10 +40,12 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
     private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
-    private static final long CAPTION_DEBOUNCE_MS = 300L;
+    private static final long CAPTION_DEBOUNCE_MS = 150L;
     private static final int CAPTION_MIN_CHARS = 2;
+    private static final long STT_QUALITY_LOG_INTERVAL_MS = 60_000L;
     private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
             Executors.newSingleThreadScheduledExecutor(new CaptionDebounceThreadFactory());
+    private static final SttQualityWindowMetrics STT_QUALITY_METRICS = new SttQualityWindowMetrics();
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -53,6 +56,9 @@ public class BotSttListener implements SttListener {
     private final String internalBaseUrl;
     private final String internalApiKey;
     private final MessageChannel captionChannel;
+    // STT final이 도착한 시점에 수신 핸들러가 모은 오디오 품질 스냅샷을 읽는다.
+    // 여기서는 차단/삭제 판단을 하지 않고, 원인 분석용 로그만 남긴다.
+    private final Supplier<SessionQualitySnapshot> qualitySnapshotSupplier;
     private final AtomicReference<String> liveCaptionMessageId = new AtomicReference<>();
     private final AtomicReference<String> desiredCaptionContent = new AtomicReference<>("");
     private final AtomicReference<String> renderedCaptionContent = new AtomicReference<>("");
@@ -68,12 +74,23 @@ public class BotSttListener implements SttListener {
     }
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName, MessageChannel captionChannel) {
+        this(meetingId, speakerDiscordId, speakerName, captionChannel, SessionQualitySnapshot::empty);
+    }
+
+    public BotSttListener(
+            long meetingId,
+            String speakerDiscordId,
+            String speakerName,
+            MessageChannel captionChannel,
+            Supplier<SessionQualitySnapshot> qualitySnapshotSupplier) {
         this.meetingId = meetingId;
         this.speakerDiscordId = speakerDiscordId;
         this.speakerName = normalizeSpeakerName(speakerName, speakerDiscordId);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
         this.captionChannel = captionChannel;
+        this.qualitySnapshotSupplier =
+                qualitySnapshotSupplier == null ? SessionQualitySnapshot::empty : qualitySnapshotSupplier;
     }
 
     @Override
@@ -101,6 +118,9 @@ public class BotSttListener implements SttListener {
         if (text == null || text.isBlank()) {
             return;
         }
+        logFinalQuality(result, text);
+        STT_QUALITY_METRICS.recordFinalText(text);
+        maybeLogSttQualityMetrics();
 
         cancelPendingPartialTask();
         upsertLiveCaption(text, true);
@@ -263,13 +283,23 @@ public class BotSttListener implements SttListener {
                 return;
             }
             String messageContent = desiredCaptionContent.get();
+            long startedAt = System.nanoTime();
             captionChannel
                     .sendMessage(messageContent)
                     .queue(
                             message -> {
+                                long elapsedMs = elapsedMillis(startedAt);
                                 liveCaptionMessageId.set(message.getId());
                                 renderedCaptionContent.set(messageContent);
                                 captionMessageCreating.set(false);
+                                log.info(
+                                        "[STT/자막메시지생성완료] speakerId={}, meetingId={}, messageId={}, elapsedMs={}, textLength={}, final={}",
+                                        speakerDiscordId,
+                                        meetingId,
+                                        message.getId(),
+                                        elapsedMs,
+                                        messageContent.length(),
+                                        desiredCaptionFinal.get());
                                 if (!messageContent.equals(desiredCaptionContent.get())) {
                                     syncLiveCaption();
                                     return;
@@ -279,11 +309,13 @@ public class BotSttListener implements SttListener {
                                 }
                             },
                             throwable -> {
+                                long elapsedMs = elapsedMillis(startedAt);
                                 captionMessageCreating.set(false);
                                 log.warn(
-                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}",
+                                        "[STT/자막메시지생성실패] speakerId={}, meetingId={}, elapsedMs={}",
                                         speakerDiscordId,
                                         meetingId,
+                                        elapsedMs,
                                         throwable);
                             });
             return;
@@ -298,12 +330,22 @@ public class BotSttListener implements SttListener {
             return;
         }
 
+        long startedAt = System.nanoTime();
         captionChannel
                 .editMessageById(messageId, desiredContent)
                 .queue(
                         message -> {
+                            long elapsedMs = elapsedMillis(startedAt);
                             renderedCaptionContent.set(desiredContent);
                             captionEditInFlight.set(false);
+                            log.info(
+                                    "[STT/자막메시지수정완료] speakerId={}, meetingId={}, messageId={}, elapsedMs={}, textLength={}, final={}",
+                                    speakerDiscordId,
+                                    meetingId,
+                                    messageId,
+                                    elapsedMs,
+                                    desiredContent.length(),
+                                    desiredCaptionFinal.get());
                             if (!desiredContent.equals(desiredCaptionContent.get())) {
                                 syncLiveCaption();
                                 return;
@@ -313,14 +355,20 @@ public class BotSttListener implements SttListener {
                             }
                         },
                         throwable -> {
+                            long elapsedMs = elapsedMillis(startedAt);
                             captionEditInFlight.set(false);
                             log.warn(
-                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}",
+                                    "[STT/자막메시지수정실패] speakerId={}, meetingId={}, messageId={}, elapsedMs={}",
                                     speakerDiscordId,
                                     meetingId,
                                     messageId,
+                                    elapsedMs,
                                     throwable);
                         });
+    }
+
+    private long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 
     private String formatCaption(String text, boolean isFinal) {
@@ -381,6 +429,41 @@ public class BotSttListener implements SttListener {
         }
     }
 
+    private void logFinalQuality(SttResult result, String text) {
+        SessionQualitySnapshot snapshot = qualitySnapshotSupplier.get();
+        long decodeFailuresDuringSession =
+                Math.max(0L, snapshot.decodeFailuresAtFinal() - snapshot.decodeFailuresAtStart());
+        int textChars = text.codePointCount(0, text.length());
+
+        log.info(
+                "[STT/품질판정] sessionId={}, speakerId={}, meetingId={}, audioMs={}, sentBytes={}, textLength={}, textChars={}, forwardedFrames={}, forwardedRawBytes={}, decodeFailuresAtStart={}, decodeFailuresAtFinal={}, decodeFailuresDuringSession={}, recentDecodeFailuresAtStart={}, recentDecodeFailuresAtFinal={}, maxVadScore={}, avgVadScore={}, text={}",
+                result.sessionId(),
+                speakerDiscordId,
+                meetingId,
+                result.audioDurationMs(),
+                result.sentPcmBytes(),
+                text.length(),
+                textChars,
+                snapshot.forwardedFrames(),
+                snapshot.forwardedRawBytes(),
+                snapshot.decodeFailuresAtStart(),
+                snapshot.decodeFailuresAtFinal(),
+                decodeFailuresDuringSession,
+                snapshot.recentDecodeFailuresAtStart(),
+                snapshot.recentDecodeFailuresAtFinal(),
+                snapshot.maxVadScore(),
+                snapshot.avgVadScore(),
+                text);
+    }
+
+    private void maybeLogSttQualityMetrics() {
+        String summary = STT_QUALITY_METRICS.snapshotAndRotateIfDue();
+        if (summary == null) {
+            return;
+        }
+        log.info("[STT/품질요약] meetingId={}, speakerId={}, {}", meetingId, speakerDiscordId, summary);
+    }
+
     private static LocalDateTime epochMsToLocalDateTime(long epochMs) {
         return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDateTime();
     }
@@ -403,6 +486,73 @@ public class BotSttListener implements SttListener {
             Thread thread = new Thread(runnable, "stt-caption-debounce");
             thread.setDaemon(true);
             return thread;
+        }
+    }
+
+    /**
+     * STT final 품질을 해석하기 위한 관측 스냅샷.
+     *
+     * <p>주의: 이 값은 저장/전송 여부를 결정하지 않는다.
+     * 실제 발화와 헛전사를 비교할 때 근거 로그로만 사용한다.
+     */
+    public record SessionQualitySnapshot(
+            long forwardedFrames,
+            long forwardedRawBytes,
+            long decodeFailuresAtStart,
+            long decodeFailuresAtFinal,
+            long recentDecodeFailuresAtStart,
+            long recentDecodeFailuresAtFinal,
+            float maxVadScore,
+            float avgVadScore) {
+        public static SessionQualitySnapshot empty() {
+            return new SessionQualitySnapshot(0L, 0L, 0L, 0L, 0L, 0L, 0.0f, 0.0f);
+        }
+    }
+
+    private static final class SttQualityWindowMetrics {
+        private long windowStartedAtMs = System.currentTimeMillis();
+        private long finalCount = 0L;
+        private long totalTextLength = 0L;
+        private long replacementCharTexts = 0L;
+
+        synchronized void recordFinalText(String text) {
+            long now = System.currentTimeMillis();
+            rotateIfNeeded(now);
+            finalCount++;
+            totalTextLength += text.length();
+            if (text.indexOf('\uFFFD') >= 0) {
+                replacementCharTexts++;
+            }
+        }
+
+        synchronized String snapshotAndRotateIfDue() {
+            long now = System.currentTimeMillis();
+            if (now - windowStartedAtMs < STT_QUALITY_LOG_INTERVAL_MS) {
+                return null;
+            }
+            double avgLen = finalCount == 0 ? 0.0 : (double) totalTextLength / finalCount;
+            double replacementRatio = finalCount == 0 ? 0.0 : (replacementCharTexts * 100.0) / finalCount;
+            String summary = "windowMs=" + Math.max(1L, now - windowStartedAtMs)
+                    + ", finalCount=" + finalCount
+                    + ", avgTextLength=" + String.format("%.2f", avgLen)
+                    + ", replacementCharTexts=" + replacementCharTexts
+                    + ", replacementRatio=" + String.format("%.2f", replacementRatio) + "%";
+            reset(now);
+            return summary;
+        }
+
+        private void rotateIfNeeded(long now) {
+            if (now - windowStartedAtMs < STT_QUALITY_LOG_INTERVAL_MS) {
+                return;
+            }
+            reset(now);
+        }
+
+        private void reset(long now) {
+            windowStartedAtMs = now;
+            finalCount = 0L;
+            totalTextLength = 0L;
+            replacementCharTexts = 0L;
         }
     }
 }

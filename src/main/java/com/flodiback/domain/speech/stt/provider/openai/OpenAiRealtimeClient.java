@@ -33,6 +33,11 @@ final class OpenAiRealtimeClient {
     private static final String DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-transcribe";
     private static final String DEFAULT_TRANSCRIBE_LANGUAGE = "ko";
     private static final Duration COMMIT_WAIT_TIMEOUT = Duration.ofSeconds(8);
+    private static final int REALTIME_SAMPLE_RATE = 24_000;
+    private static final int PCM16_BYTES_PER_SAMPLE = 2;
+    private static final int MIN_COMMIT_AUDIO_MS = 100;
+    private static final long MIN_COMMIT_PCM_BYTES =
+            (long) REALTIME_SAMPLE_RATE * PCM16_BYTES_PER_SAMPLE * MIN_COMMIT_AUDIO_MS / 1000L;
 
     private final HttpClient httpClient =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -97,12 +102,22 @@ final class OpenAiRealtimeClient {
      */
     void commitAndClose(OpenAiSttSessionState session) throws Exception {
         WebSocket webSocket = requireWebSocket(session);
+        long sentBytes = session.sentPcmBytes();
+        if (sentBytes < MIN_COMMIT_PCM_BYTES) {
+            log.info(
+                    "[OPENAI/커밋생략] sessionId={}, sentBytes={}, minBytes={}, reason=audio_too_short",
+                    session.sessionId(),
+                    sentBytes,
+                    MIN_COMMIT_PCM_BYTES);
+            webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "audio_too_short").join();
+            return;
+        }
 
         ObjectNode commit = objectMapper.createObjectNode();
         commit.put("type", "input_audio_buffer.commit");
         sendJson(webSocket, commit);
 
-        log.info("[OPENAI/커밋전송] sessionId={}, sentBytes={}", session.sessionId(), session.sentPcmBytes());
+        log.info("[OPENAI/커밋전송] sessionId={}, sentBytes={}", session.sessionId(), sentBytes);
 
         // completed 이벤트를 기다렸다가 닫는다.
         // 네트워크 상태에 따라 못 받을 수도 있으므로 timeout을 둔다.
