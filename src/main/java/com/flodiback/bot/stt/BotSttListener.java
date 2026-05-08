@@ -462,6 +462,8 @@ public class BotSttListener implements SttListener {
             return;
         }
         log.info("[STT/품질요약] meetingId={}, speakerId={}, {}", meetingId, speakerDiscordId, summary);
+    }
+
     private static LocalDateTime epochMsToLocalDateTime(long epochMs) {
         return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDateTime();
     }
