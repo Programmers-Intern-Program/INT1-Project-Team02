@@ -1,7 +1,7 @@
 # 2026-05-08-114000-discord-ephemeral-dashboard-codex
 
-- author: codex
-- status: completed
+- 작성자: codex
+- 상태: 완료(읽기 전용)
 - created-at: 2026-05-08 11:40:00
 
 ## Background

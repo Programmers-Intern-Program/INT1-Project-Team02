@@ -1,7 +1,7 @@
 # 2026-05-08-104349-discord-component-ui-codex
 
-- author: codex
-- status: completed
+- 작성자: codex
+- 상태: 완료(읽기 전용)
 - created-at: 2026-05-08 10:43:49
 
 ## Background
