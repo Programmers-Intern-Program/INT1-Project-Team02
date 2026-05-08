@@ -46,7 +46,7 @@ GLM 호출은 외부 네트워크와 모델 응답 시간에 의존한다. timeo
 - 로그: prompt 원문, 응답 원문, API key는 남기지 않음
 
 ### 설계 결정사항
-- 기본 timeout은 8000ms로 둔다.
+- 기본 timeout은 30000ms로 둔다.
 - 기본 retry는 1회로 둔다.
 - GLM 실패 시 상위 speech 흐름의 기존 fallback 정책을 유지한다.
 

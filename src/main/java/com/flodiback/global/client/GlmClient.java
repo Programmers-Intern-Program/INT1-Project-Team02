@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
  * glm.api.key=발급받은_API_KEY
  * glm.api.model=glm-5.1
  * glm.api.url=https://...  # GLM Gateway base URL
- * glm.api.timeout-ms=8000
+ * glm.api.timeout-ms=30000
  * glm.api.max-retries=1
  * </pre>
  *
@@ -62,7 +62,7 @@ public class GlmClient {
             @Value("${glm.api.key}") String apiKey,
             @Value("${glm.api.model}") String model,
             @Value("${glm.api.url}") String apiUrl,
-            @Value("${glm.api.timeout-ms:8000}") long timeoutMs,
+            @Value("${glm.api.timeout-ms:30000}") long timeoutMs,
             @Value("${glm.api.max-retries:1}") int maxRetries) {
         this(model, createCompletionRequester(apiKey, apiUrl, timeoutMs, maxRetries));
     }
