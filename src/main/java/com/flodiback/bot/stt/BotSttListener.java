@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,9 @@ public class BotSttListener implements SttListener {
     private final String internalBaseUrl;
     private final String internalApiKey;
     private final MessageChannel captionChannel;
+    // STT final이 도착한 시점에 수신 핸들러가 모은 오디오 품질 스냅샷을 읽는다.
+    // 여기서는 차단/삭제 판단을 하지 않고, 원인 분석용 로그만 남긴다.
+    private final Supplier<SessionQualitySnapshot> qualitySnapshotSupplier;
     private final AtomicReference<String> liveCaptionMessageId = new AtomicReference<>();
     private final AtomicReference<String> desiredCaptionContent = new AtomicReference<>("");
     private final AtomicReference<String> renderedCaptionContent = new AtomicReference<>("");
@@ -68,12 +72,23 @@ public class BotSttListener implements SttListener {
     }
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName, MessageChannel captionChannel) {
+        this(meetingId, speakerDiscordId, speakerName, captionChannel, SessionQualitySnapshot::empty);
+    }
+
+    public BotSttListener(
+            long meetingId,
+            String speakerDiscordId,
+            String speakerName,
+            MessageChannel captionChannel,
+            Supplier<SessionQualitySnapshot> qualitySnapshotSupplier) {
         this.meetingId = meetingId;
         this.speakerDiscordId = speakerDiscordId;
         this.speakerName = normalizeSpeakerName(speakerName, speakerDiscordId);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
         this.captionChannel = captionChannel;
+        this.qualitySnapshotSupplier =
+                qualitySnapshotSupplier == null ? SessionQualitySnapshot::empty : qualitySnapshotSupplier;
     }
 
     @Override
@@ -101,6 +116,7 @@ public class BotSttListener implements SttListener {
         if (text == null || text.isBlank()) {
             return;
         }
+        logFinalQuality(result, text);
         STT_QUALITY_METRICS.recordFinalText(text);
         maybeLogSttQualityMetrics();
 
@@ -408,6 +424,33 @@ public class BotSttListener implements SttListener {
         }
     }
 
+    private void logFinalQuality(SttResult result, String text) {
+        SessionQualitySnapshot snapshot = qualitySnapshotSupplier.get();
+        long decodeFailuresDuringSession =
+                Math.max(0L, snapshot.decodeFailuresAtFinal() - snapshot.decodeFailuresAtStart());
+        int textChars = text.codePointCount(0, text.length());
+
+        log.info(
+                "[STT/품질판정] sessionId={}, speakerId={}, meetingId={}, audioMs={}, sentBytes={}, textLength={}, textChars={}, forwardedFrames={}, forwardedRawBytes={}, decodeFailuresAtStart={}, decodeFailuresAtFinal={}, decodeFailuresDuringSession={}, recentDecodeFailuresAtStart={}, recentDecodeFailuresAtFinal={}, maxVadScore={}, avgVadScore={}, text={}",
+                result.sessionId(),
+                speakerDiscordId,
+                meetingId,
+                result.audioDurationMs(),
+                result.sentPcmBytes(),
+                text.length(),
+                textChars,
+                snapshot.forwardedFrames(),
+                snapshot.forwardedRawBytes(),
+                snapshot.decodeFailuresAtStart(),
+                snapshot.decodeFailuresAtFinal(),
+                decodeFailuresDuringSession,
+                snapshot.recentDecodeFailuresAtStart(),
+                snapshot.recentDecodeFailuresAtFinal(),
+                snapshot.maxVadScore(),
+                snapshot.avgVadScore(),
+                text);
+    }
+
     private void maybeLogSttQualityMetrics() {
         String summary = STT_QUALITY_METRICS.snapshotAndRotateIfDue();
         if (summary == null) {
@@ -434,6 +477,26 @@ public class BotSttListener implements SttListener {
             Thread thread = new Thread(runnable, "stt-caption-debounce");
             thread.setDaemon(true);
             return thread;
+        }
+    }
+
+    /**
+     * STT final 품질을 해석하기 위한 관측 스냅샷.
+     *
+     * <p>주의: 이 값은 저장/전송 여부를 결정하지 않는다.
+     * 실제 발화와 헛전사를 비교할 때 근거 로그로만 사용한다.
+     */
+    public record SessionQualitySnapshot(
+            long forwardedFrames,
+            long forwardedRawBytes,
+            long decodeFailuresAtStart,
+            long decodeFailuresAtFinal,
+            long recentDecodeFailuresAtStart,
+            long recentDecodeFailuresAtFinal,
+            float maxVadScore,
+            float avgVadScore) {
+        public static SessionQualitySnapshot empty() {
+            return new SessionQualitySnapshot(0L, 0L, 0L, 0L, 0L, 0L, 0.0f, 0.0f);
         }
     }
 

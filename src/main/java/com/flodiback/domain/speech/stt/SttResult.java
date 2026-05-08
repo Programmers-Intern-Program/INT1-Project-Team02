@@ -14,5 +14,9 @@ public record SttResult(
         long startMs,
         // 텍스트 구간 끝 시각  (ms 단위)
         long endMs,
+        // OpenAI로 실제 전송된 PCM 바이트 수. 짧은 잡음/헛전사 판별을 위한 관측값입니다.
+        long sentPcmBytes,
+        // sentPcmBytes를 기준으로 계산한 전송 오디오 길이(ms). 정책 적용 없이 로그 관측에만 씁니다.
+        long audioDurationMs,
         // 인식 신뢰도
         Float confidence) {}

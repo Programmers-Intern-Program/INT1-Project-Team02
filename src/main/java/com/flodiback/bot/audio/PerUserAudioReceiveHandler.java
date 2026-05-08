@@ -51,6 +51,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static final long LOG_INTERVAL_PACKETS = 50;
     // 복호화 품질 요약 로그 주기(ms)
     private static final long DECRYPT_METRICS_LOG_INTERVAL_MS = 60_000L;
+    // final 품질 로그에서 "최근 복호화 실패"로 볼 시간 범위(ms)
+    private static final long QUALITY_RECENT_FAILURE_WINDOW_MS = 1_500L;
     // 연속 실패 streak가 이 값 이상이면 burst로 본다.
     private static final long DECRYPT_BURST_STREAK_THRESHOLD = 5L;
     // 이 시간(ms) 동안 화자 오디오 전달이 없으면 해당 STT 세션을 종료한다.
@@ -89,6 +91,10 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final AtomicLong decodedFromEncodedByteCount = new AtomicLong();
     // 디코딩 null/실패 프레임 카운트
     private final AtomicLong decodeFailureCount = new AtomicLong();
+    // final 품질 로그는 화자별 비교가 필요하므로 사용자별 실패 수를 별도로 누적한다.
+    private final Map<Long, AtomicLong> decodeFailureCountByUserId = new ConcurrentHashMap<>();
+    // 발화 시작/종료 주변에 실패가 몰렸는지 보기 위한 최근 실패 타임라인.
+    private final Map<Long, RecentDecodeFailureTracker> recentDecodeFailuresByUserId = new ConcurrentHashMap<>();
 
     // 첫 디코딩 실패 사유를 기록해 원인 파악에 사용
     private final AtomicReference<String> firstDecodeFailureReason = new AtomicReference<>();
@@ -169,7 +175,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         if (!canDecode) {
             // canDecode=false 프레임은 STT 전송 대상에서 제외
             nonDecodableEncodedPackets.incrementAndGet();
-            decryptWindowMetrics.recordFailure(now, DecodeFailureType.CANNOT_DECODE);
+            recordDecodeFailureEvent(userId, now, DecodeFailureType.CANNOT_DECODE);
             if (firstDecodeFailureReason.get() == null) {
                 try {
                     packet.decode();
@@ -185,7 +191,11 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     // 일부 프레임은 canDecode=true여도 실제 PCM 추출이 실패할 수 있다.
                     // (예: DAVE decrypt 실패, 순서 꼬임 등)
                     // 이 프레임은 버리고 다음 프레임으로 진행한다.
-                    decryptWindowMetrics.recordFailure(now, DecodeFailureType.EMPTY_PCM);
+                    nonDecodableEncodedPackets.incrementAndGet();
+                    long failures = recordDecodeFailureEvent(userId, now, DecodeFailureType.EMPTY_PCM);
+                    if (failures <= 3 || failures % 200 == 0) {
+                        log.warn("[음성/빈PCM] guildId={}, userId={}, decodeFailures={}", guildId, userId, failures);
+                    }
                     return;
                 }
                 decryptWindowMetrics.recordSuccess();
@@ -207,6 +217,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     if (session == null) {
                         // no-op
                     } else {
+                        session.recordVadScore(speechEvidence.webRtcScore);
                         session.lastAudioAtMs.set(now);
                         for (byte[] preRollFrame : stats.preRollBuffer.drain()) {
                             submitSttSendTask(session, userId, preRollFrame, now);
@@ -214,13 +225,12 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                     }
                 } else {
                     // 이미 발화 중이면 현재 프레임을 바로 전송한다.
-                    forwardPcmToStt(userId, stats.userName, decodedPcm, now);
+                    forwardPcmToStt(userId, stats.userName, decodedPcm, speechEvidence.webRtcScore, now);
                 }
             } catch (Exception decodeException) {
                 nonDecodableEncodedPackets.incrementAndGet();
-                decryptWindowMetrics.recordFailure(now, DecodeFailureType.EXCEPTION);
                 firstDecodeFailureReason.compareAndSet(null, decodeException.getMessage());
-                long failures = decodeFailureCount.incrementAndGet();
+                long failures = recordDecodeFailureEvent(userId, now, DecodeFailureType.EXCEPTION);
                 // 실시간 수신 루프에서 매 프레임 warn을 찍으면 로그가 폭증하므로 샘플링한다.
                 if (failures <= 3 || failures % 200 == 0) {
                     log.warn(
@@ -402,13 +412,14 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
      * - 있으면 마지막 활동 시각 갱신
      * - 그리고 sendPcm 호출
      */
-    private void forwardPcmToStt(long userId, String speakerName, byte[] decodedPcm, long now) {
+    private void forwardPcmToStt(long userId, String speakerName, byte[] decodedPcm, float vadScore, long now) {
         // 세션이 없으면 생성(start), 있으면 재사용
         ActiveSttSession session = getOrCreateSttSession(userId, speakerName, now);
         if (session == null) {
             return;
         }
 
+        session.recordVadScore(vadScore);
         session.lastAudioAtMs.set(now);
         submitSttSendTask(session, userId, decodedPcm, now);
     }
@@ -427,7 +438,11 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         // 세션 ID는 길드/화자/시작시각 조합으로 생성한다.
         String sessionId = guildId + ":" + speakerId + ":" + now;
 
-        ActiveSttSession created = new ActiveSttSession(sessionId, speakerId, now);
+        // 세션 시작 시점의 복호화 상태를 고정해 final 시점과 비교한다.
+        long decodeFailuresAtStart = decodeFailuresForUser(userId);
+        long recentDecodeFailuresAtStart = recentDecodeFailuresForUser(userId, now);
+        ActiveSttSession created =
+                new ActiveSttSession(sessionId, speakerId, now, decodeFailuresAtStart, recentDecodeFailuresAtStart);
         ActiveSttSession previous = activeSttSessionsByUserId.putIfAbsent(userId, created);
         if (previous != null) {
             return previous;
@@ -467,6 +482,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             // 세션 교체 경합으로 늦게 도착한 작업이면 무시
             return;
         }
+        session.recordForwardedPcm(pcm.length);
         session.lastAudioAtMs.set(now);
         sttProvider.sendPcm(session.sessionId, pcm, now);
     }
@@ -476,8 +492,12 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
             sttIoExecutor.execute(() -> {
                 try {
                     // 세션 시작 시 화자/미팅 컨텍스트를 리스너에 고정한다.
-                    BotSttListener listener =
-                            new BotSttListener(meetingId, session.speakerId, speakerName, captionChannel);
+                    BotSttListener listener = new BotSttListener(
+                            meetingId,
+                            session.speakerId,
+                            speakerName,
+                            captionChannel,
+                            () -> buildQualitySnapshot(userId, session));
                     sttProvider.startSession(session.sessionId, session.speakerId, listener);
                     log.info(
                             "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",
@@ -601,6 +621,39 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         }
     }
 
+    private BotSttListener.SessionQualitySnapshot buildQualitySnapshot(long userId, ActiveSttSession session) {
+        long now = System.currentTimeMillis();
+        long decodeFailuresAtFinal = decodeFailuresForUser(userId);
+        long recentDecodeFailuresAtFinal = recentDecodeFailuresForUser(userId, now);
+        return session.toQualitySnapshot(decodeFailuresAtFinal, recentDecodeFailuresAtFinal);
+    }
+
+    private long recordDecodeFailureEvent(long userId, long now, DecodeFailureType failureType) {
+        // 전역 요약 로그와 final 품질 로그가 같은 실패 이벤트를 바라보도록 한 곳에서 기록한다.
+        decryptWindowMetrics.recordFailure(now, failureType);
+        long failures = decodeFailureCount.incrementAndGet();
+        decodeFailureCountByUserId
+                .computeIfAbsent(userId, ignored -> new AtomicLong())
+                .incrementAndGet();
+        recentDecodeFailuresByUserId
+                .computeIfAbsent(userId, ignored -> new RecentDecodeFailureTracker())
+                .record(now);
+        return failures;
+    }
+
+    private long decodeFailuresForUser(long userId) {
+        AtomicLong counter = decodeFailureCountByUserId.get(userId);
+        return counter == null ? 0L : counter.get();
+    }
+
+    private long recentDecodeFailuresForUser(long userId, long now) {
+        RecentDecodeFailureTracker tracker = recentDecodeFailuresByUserId.get(userId);
+        if (tracker == null) {
+            return 0L;
+        }
+        return tracker.countSince(now - QUALITY_RECENT_FAILURE_WINDOW_MS);
+    }
+
     /**
      * OpusPacket에서 PCM 바이트를 안전하게 추출한다.
      *
@@ -613,12 +666,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         try {
             short[] decodedShort = packet.decode();
             if (decodedShort == null || decodedShort.length == 0) {
-                nonDecodableEncodedPackets.incrementAndGet();
                 firstDecodeFailureReason.compareAndSet(null, "decodedShort is null/empty");
-                long failures = decodeFailureCount.incrementAndGet();
-                if (failures <= 3 || failures % 200 == 0) {
-                    log.warn("[음성/빈PCM] guildId={}, userId={}, decodeFailures={}", guildId, userId, failures);
-                }
                 return null;
             }
 
@@ -775,14 +823,66 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private static class ActiveSttSession {
         private final String sessionId;
         private final String speakerId;
+        private final long decodeFailuresAtStart;
+        private final long recentDecodeFailuresAtStart;
+        // OpenAI로 넘기려고 큐에 태운 PCM 프레임/바이트 수.
+        private final AtomicLong forwardedFrameCount = new AtomicLong();
+        private final AtomicLong forwardedRawPcmBytes = new AtomicLong();
+        // VAD 점수는 final 품질 로그에서 "얼마나 확실한 발화였는지" 보는 관측값이다.
+        private final Object vadScoreLock = new Object();
+        private float maxVadScore = 0.0f;
+        private double totalVadScore = 0.0d;
+        private long vadScoreCount = 0L;
         // 마지막으로 STT에 PCM을 보낸 시각.
         // silence watcher가 이 값을 기준으로 종료 시점을 계산한다.
         private final AtomicLong lastAudioAtMs = new AtomicLong();
 
-        private ActiveSttSession(String sessionId, String speakerId, long startedAtMs) {
+        private ActiveSttSession(
+                String sessionId,
+                String speakerId,
+                long startedAtMs,
+                long decodeFailuresAtStart,
+                long recentDecodeFailuresAtStart) {
             this.sessionId = sessionId;
             this.speakerId = speakerId;
+            this.decodeFailuresAtStart = decodeFailuresAtStart;
+            this.recentDecodeFailuresAtStart = recentDecodeFailuresAtStart;
             this.lastAudioAtMs.set(startedAtMs);
+        }
+
+        private void recordForwardedPcm(int pcmBytes) {
+            forwardedFrameCount.incrementAndGet();
+            forwardedRawPcmBytes.addAndGet(pcmBytes);
+        }
+
+        private void recordVadScore(float vadScore) {
+            if (Float.isNaN(vadScore) || Float.isInfinite(vadScore)) {
+                return;
+            }
+            synchronized (vadScoreLock) {
+                maxVadScore = Math.max(maxVadScore, vadScore);
+                totalVadScore += vadScore;
+                vadScoreCount++;
+            }
+        }
+
+        private BotSttListener.SessionQualitySnapshot toQualitySnapshot(
+                long decodeFailuresAtFinal, long recentDecodeFailuresAtFinal) {
+            float currentMaxVadScore;
+            float currentAvgVadScore;
+            synchronized (vadScoreLock) {
+                currentMaxVadScore = maxVadScore;
+                currentAvgVadScore = vadScoreCount == 0 ? 0.0f : (float) (totalVadScore / vadScoreCount);
+            }
+            return new BotSttListener.SessionQualitySnapshot(
+                    forwardedFrameCount.get(),
+                    forwardedRawPcmBytes.get(),
+                    decodeFailuresAtStart,
+                    decodeFailuresAtFinal,
+                    recentDecodeFailuresAtStart,
+                    recentDecodeFailuresAtFinal,
+                    currentMaxVadScore,
+                    currentAvgVadScore);
         }
     }
 
@@ -893,6 +993,26 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
         CANNOT_DECODE,
         EMPTY_PCM,
         EXCEPTION
+    }
+
+    private static final class RecentDecodeFailureTracker {
+        private final Deque<Long> failureTimesMs = new ArrayDeque<>();
+
+        synchronized void record(long nowMs) {
+            failureTimesMs.addLast(nowMs);
+            pruneOlderThan(nowMs - QUALITY_RECENT_FAILURE_WINDOW_MS);
+        }
+
+        synchronized long countSince(long cutoffMs) {
+            pruneOlderThan(cutoffMs);
+            return failureTimesMs.size();
+        }
+
+        private void pruneOlderThan(long cutoffMs) {
+            while (!failureTimesMs.isEmpty() && failureTimesMs.peekFirst() < cutoffMs) {
+                failureTimesMs.removeFirst();
+            }
+        }
     }
 
     private static final class DecryptWindowMetrics {
