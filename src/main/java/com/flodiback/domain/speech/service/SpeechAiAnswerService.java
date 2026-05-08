@@ -1,7 +1,6 @@
 package com.flodiback.domain.speech.service;
 
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -24,9 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SpeechAiAnswerService {
 
-    private static final List<String> WAKE_WORDS =
-            List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "플로드야", "flodiya", "plodiya");
-    private static final Pattern LEADING_PUNCTUATION = Pattern.compile("^[\\s,，.。?？!！:：;；-]+");
     private static final String SYSTEM_PROMPT = """
             너는 Discord 회의에 참여하는 AI 회의 보조자야.
             항상 회의 컨텍스트를 먼저 확인하고 한국어로 2~3문장만 답해줘.
@@ -39,7 +35,7 @@ public class SpeechAiAnswerService {
     private final AiChatService aiChatService;
 
     public String generateAnswerIfCalled(Long meetingId, String speechText) {
-        String question = extractQuestion(speechText);
+        String question = AssistantCallExtractor.extractQuestion(speechText);
         if (!StringUtils.hasText(question)) {
             return null;
         }
@@ -53,36 +49,6 @@ public class SpeechAiAnswerService {
             log.warn("AI 답변 생성에 실패했습니다. meetingId={}, reason={}", meetingId, e.getMessage());
             return null;
         }
-    }
-
-    private String extractQuestion(String speechText) {
-        // 빈 STT 문장은 AI가 답할 질문으로 볼 수 없으므로 바로 종료합니다.
-        if (!StringUtils.hasText(speechText)) {
-            return null;
-        }
-
-        int wakeWordIndex = Integer.MAX_VALUE;
-        String matchedWakeWord = null;
-
-        // 한 문장에 호출어가 여러 개 있어도 가장 앞에 나온 호출어를 기준으로 질문을 자릅니다.
-        for (String wakeWord : WAKE_WORDS) {
-            int index = speechText.indexOf(wakeWord);
-            if (index >= 0 && index < wakeWordIndex) {
-                wakeWordIndex = index;
-                matchedWakeWord = wakeWord;
-            }
-        }
-
-        if (matchedWakeWord == null) {
-            return null;
-        }
-
-        // 호출어 뒤에 붙은 쉼표, 물음표, 공백을 제거해 실제 질문만 남깁니다.
-        String rawQuestion = speechText.substring(wakeWordIndex + matchedWakeWord.length());
-        String question =
-                LEADING_PUNCTUATION.matcher(rawQuestion).replaceFirst("").strip();
-
-        return StringUtils.hasText(question) ? question : null;
     }
 
     private String buildUserPrompt(ContextResponse context, String question) {

@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
+import com.flodiback.domain.speech.service.AssistantCallExtractor;
 import com.flodiback.domain.speech.stt.SttListener;
 import com.flodiback.domain.speech.stt.SttResult;
 
@@ -41,8 +42,6 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
  */
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
-    private static final List<String> WAKE_WORDS =
-            List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "플로드야", "flodiya", "plodiya");
     private static final long CAPTION_DEBOUNCE_MS = 150L;
     private static final int CAPTION_MIN_CHARS = 2;
     private static final int DISCORD_MESSAGE_LIMIT = 2000;
@@ -556,15 +555,7 @@ public class BotSttListener implements SttListener {
     }
 
     private boolean containsWakeWord(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        for (String wakeWord : WAKE_WORDS) {
-            if (text.contains(wakeWord)) {
-                return true;
-            }
-        }
-        return false;
+        return AssistantCallExtractor.containsWakeWord(text);
     }
 
     private static final class CaptionDebounceThreadFactory implements ThreadFactory {

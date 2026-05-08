@@ -7,9 +7,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -76,6 +78,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private static final int PROJECT_SELECT_LIMIT = 25;
     private static final int DECISION_PREVIEW_LIMIT = 3;
     private static final int TEMPORARY_MESSAGE_SECONDS = 45;
+    private static final String ENV_ALLOWED_GUILD_IDS = "DISCORD_ALLOWED_GUILD_IDS";
 
     private enum ProjectCreationStep {
         WAITING_NAME,
@@ -98,6 +101,8 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record MeetingConfirmationState(MeetingStartContext ctx, long createdAt) {}
 
+    private record MeetingEndResult(Long meetingId, boolean hadVoiceState) {}
+
     // 명령어 접두사. 기본값은 !.
     private final String prefix;
     // 실제 STT 엔진 구현체. 현재 기본값은 OpenAI.
@@ -106,10 +111,13 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String internalBaseUrl;
     private final String internalApiKey;
+    private final Set<Long> allowedGuildIds;
     // 길드별 오디오 수신 핸들러 캐시
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
     // 길드별 활성 meetingId
     private final Map<Long, Long> activeMeetingIdByGuild = new ConcurrentHashMap<>();
+    // 길드별 회의 생성 중복 요청 방지
+    private final Set<Long> startingGuildIds = ConcurrentHashMap.newKeySet();
     // 채널별 진행 중인 프로젝트 생성 상태
     private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
     // 채널별 회의 시작 확인 대기 상태
@@ -124,12 +132,18 @@ public class DiscordCommandListener extends ListenerAdapter {
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
+        this.allowedGuildIds = parseAllowedGuildIds(BotEnv.get(ENV_ALLOWED_GUILD_IDS));
     }
 
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
         // 봇 메시지와 DM은 명령 처리 대상에서 제외
         if (event.getAuthor().isBot() || !event.isFromGuild()) {
+            return;
+        }
+        if (!isAllowedGuild(event.getGuild().getIdLong())) {
+            log.debug(
+                    "[봇/서버무시] guildId={}, reason=not_allowed", event.getGuild().getIdLong());
             return;
         }
 
@@ -191,6 +205,13 @@ public class DiscordCommandListener extends ListenerAdapter {
             event.reply("서버 채널에서만 사용할 수 있어요.").setEphemeral(true).queue();
             return;
         }
+        if (!isAllowedGuild(event.getGuild().getIdLong())) {
+            log.debug(
+                    "[봇/인터랙션무시] guildId={}, componentId={}, reason=not_allowed",
+                    event.getGuild().getIdLong(),
+                    event.getComponentId());
+            return;
+        }
 
         switch (event.getComponentId()) {
             case BUTTON_PANEL_OPEN -> {
@@ -213,9 +234,9 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case BUTTON_MEETING_END -> {
                 event.deferReply(true).queue();
-                handleMeetingEnd(event.getGuild(), event.getChannel());
+                MeetingEndResult result = endActiveMeeting(event.getGuild());
                 event.getHook()
-                        .sendMessage("회의 종료 요청을 처리했어요.")
+                        .sendMessage(buildMeetingEndMessage(result))
                         .setEphemeral(true)
                         .queue();
             }
@@ -228,6 +249,9 @@ public class DiscordCommandListener extends ListenerAdapter {
     @Override
     public void onStringSelectInteraction(StringSelectInteractionEvent event) {
         if (!SELECT_PROJECT.equals(event.getComponentId())) {
+            return;
+        }
+        if (!event.isFromGuild() || !isAllowedGuild(event.getGuild().getIdLong())) {
             return;
         }
         event.deferReply(true).queue();
@@ -259,6 +283,9 @@ public class DiscordCommandListener extends ListenerAdapter {
     @Override
     public void onModalInteraction(ModalInteractionEvent event) {
         if (!MODAL_PROJECT_CREATE.equals(event.getModalId())) {
+            return;
+        }
+        if (!event.isFromGuild() || !isAllowedGuild(event.getGuild().getIdLong())) {
             return;
         }
 
@@ -769,13 +796,16 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleMeetingEnd(MessageReceivedEvent event) {
-        handleMeetingEnd(event.getGuild(), event.getChannel());
+        MeetingEndResult result = endActiveMeeting(event.getGuild());
+        sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 
-    private void handleMeetingEnd(Guild guild, MessageChannel channel) {
+    private MeetingEndResult endActiveMeeting(Guild guild) {
         long guildId = guild.getIdLong();
         AudioManager audioManager = guild.getAudioManager();
         PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
+        Long meetingId = activeMeetingIdByGuild.remove(guildId);
+        boolean hadVoiceState = handler != null || audioManager.isConnected();
 
         if (handler != null) {
             handler.closeAllSttSessions();
@@ -785,15 +815,11 @@ public class DiscordCommandListener extends ListenerAdapter {
         audioManager.setReceivingHandler(null);
         audioManager.setConnectionListener(null);
 
-        Long meetingId = activeMeetingIdByGuild.remove(guildId);
-        if (meetingId == null) {
-            sendTemporaryMessage(channel, "진행 중인 회의가 없어요.");
-            return;
+        if (meetingId != null) {
+            endMeeting(guildId, meetingId);
         }
-
-        endMeeting(guildId, meetingId);
-        channel.sendMessage("회의가 종료됐습니다. 요약을 생성 중이에요...").queue();
-        log.info("[미팅/종료명령] guildId={}, meetingId={}", guildId, meetingId);
+        log.info("[미팅/종료명령] guildId={}, meetingId={}, hadVoiceState={}", guildId, meetingId, hadVoiceState);
+        return new MeetingEndResult(meetingId, hadVoiceState);
     }
 
     private Long fetchProjectIdByChannel(long channelId) {
@@ -824,40 +850,53 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void startMeeting(MeetingStartContext ctx, Long projectId) {
-        Long meetingId = createMeeting(ctx.guildId(), ctx.guildName(), projectId);
-        if (meetingId == null) {
-            ctx.textChannel().sendMessage("회의 생성 실패. 서버 로그를 확인해주세요.").queue();
+        if (activeMeetingIdByGuild.containsKey(ctx.guildId())) {
+            ctx.textChannel().sendMessage("이미 진행 중인 회의가 있어요. 먼저 회의 종료를 눌러주세요.").queue();
+            return;
+        }
+        if (!startingGuildIds.add(ctx.guildId())) {
+            ctx.textChannel().sendMessage("회의 시작 요청을 처리 중이에요. 잠시만 기다려주세요.").queue();
             return;
         }
 
-        PerUserAudioReceiveHandler existing = receiveHandlers.remove(ctx.guildId());
-        if (existing != null) {
-            existing.closeAllSttSessions();
+        Long meetingId = createMeeting(ctx.guildId(), ctx.guildName(), projectId);
+        try {
+            if (meetingId == null) {
+                ctx.textChannel().sendMessage("회의 생성 실패. 서버 로그를 확인해주세요.").queue();
+                return;
+            }
+
+            PerUserAudioReceiveHandler existing = receiveHandlers.remove(ctx.guildId());
+            if (existing != null) {
+                existing.closeAllSttSessions();
+            }
+
+            PerUserAudioReceiveHandler handler =
+                    new PerUserAudioReceiveHandler(ctx.guildId(), ctx.guild(), sttProvider, meetingId);
+            receiveHandlers.put(ctx.guildId(), handler);
+            activeMeetingIdByGuild.put(ctx.guildId(), meetingId);
+            handler.updateCaptionChannel(ctx.textChannel());
+
+            ctx.audioManager().setReceivingHandler(handler);
+            ctx.audioManager().setConnectionListener(new LoggingConnectionListener(ctx.guildId(), ctx.voiceChannel()));
+            ctx.audioManager().setAutoReconnect(true);
+            ctx.audioManager().setSelfMuted(false);
+            ctx.audioManager().setSelfDeafened(false);
+            ctx.audioManager().openAudioConnection(ctx.voiceChannel());
+
+            ctx.textChannel()
+                    .sendMessage(
+                            "회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
+                    .queue();
+            log.info(
+                    "[미팅/시작] guildId={}, meetingId={}, projectId={}, channel={}",
+                    ctx.guildId(),
+                    meetingId,
+                    projectId,
+                    ctx.voiceChannel().getName());
+        } finally {
+            startingGuildIds.remove(ctx.guildId());
         }
-
-        PerUserAudioReceiveHandler handler =
-                new PerUserAudioReceiveHandler(ctx.guildId(), ctx.guild(), sttProvider, meetingId);
-        receiveHandlers.put(ctx.guildId(), handler);
-        activeMeetingIdByGuild.put(ctx.guildId(), meetingId);
-        handler.updateCaptionChannel(ctx.textChannel());
-
-        ctx.audioManager().setReceivingHandler(handler);
-        ctx.audioManager().setConnectionListener(new LoggingConnectionListener(ctx.guildId(), ctx.voiceChannel()));
-        ctx.audioManager().setAutoReconnect(true);
-        ctx.audioManager().setSelfMuted(false);
-        ctx.audioManager().setSelfDeafened(false);
-        ctx.audioManager().openAudioConnection(ctx.voiceChannel());
-
-        ctx.textChannel()
-                .sendMessage(
-                        "회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
-                .queue();
-        log.info(
-                "[미팅/시작] guildId={}, meetingId={}, projectId={}, channel={}",
-                ctx.guildId(),
-                meetingId,
-                projectId,
-                ctx.voiceChannel().getName());
     }
 
     private Long createProject(
@@ -984,27 +1023,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleLeave(MessageReceivedEvent event) {
-        long guildId = event.getGuild().getIdLong();
-        AudioManager audioManager = event.getGuild().getAudioManager();
-        PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
-
-        // leave 시점에는 열린 STT 세션을 먼저 commit/end로 닫는다.
-        if (handler != null) {
-            handler.closeAllSttSessions();
-        }
-
-        // Discord 음성 연결 종료 및 핸들러 해제
-        audioManager.closeAudioConnection();
-        audioManager.setReceivingHandler(null);
-        audioManager.setConnectionListener(null);
-
-        Long meetingId = activeMeetingIdByGuild.remove(guildId);
-        if (meetingId != null) {
-            endMeeting(guildId, meetingId);
-        }
-
-        event.getChannel().sendMessage("퇴장 완료").queue();
-        log.info("[디스코드/퇴장] guildId={}, meetingId={}", event.getGuild().getId(), meetingId);
+        MeetingEndResult result = endActiveMeeting(event.getGuild());
+        sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 
     private void handleStats(MessageReceivedEvent event) {
@@ -1103,6 +1123,39 @@ public class DiscordCommandListener extends ListenerAdapter {
             return normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private String buildMeetingEndMessage(MeetingEndResult result) {
+        if (result.meetingId() != null) {
+            return "회의가 종료됐고 음성 연결도 정리했어요. 요약을 생성 중이에요... (meetingId=" + result.meetingId() + ")";
+        }
+        if (result.hadVoiceState()) {
+            return "저장 중인 회의는 없었지만 남아 있던 음성 연결은 정리했어요.";
+        }
+        return "이 봇 인스턴스에는 진행 중인 회의나 음성 연결이 없어요.";
+    }
+
+    private boolean isAllowedGuild(long guildId) {
+        return allowedGuildIds.isEmpty() || allowedGuildIds.contains(guildId);
+    }
+
+    static Set<Long> parseAllowedGuildIds(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        Set<Long> result = new HashSet<>();
+        for (String token : raw.split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                result.add(Long.parseLong(trimmed));
+            } catch (NumberFormatException exception) {
+                log.warn("[봇/서버필터무시] value={}, reason=invalid_guild_id", trimmed);
+            }
+        }
+        return Set.copyOf(result);
     }
 
     private final class LoggingConnectionListener implements ConnectionListener {
