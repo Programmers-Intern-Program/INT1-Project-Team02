@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.flodiback.bot.command.DiscordCommandListener;
+import com.flodiback.bot.stt.RedisPublisher;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
@@ -53,14 +54,19 @@ public final class DiscordBotMain {
         // 5) STT provider 인스턴스 준비
         SttProvider sttProvider = new OpenAiSttProvider();
 
-        // 6) JDA 빌드 + 명령 리스너 등록
+        // 6) Redis publisher 초기화
+        String redisHost = BotEnv.getOrDefault("REDIS_HOST", "localhost");
+        int redisPort = Integer.parseInt(BotEnv.getOrDefault("REDIS_PORT", "6379"));
+        RedisPublisher redisPublisher = new RedisPublisher(redisHost, redisPort);
+
+        // 7) JDA 빌드 + 명령 리스너 등록
         JDA jda = JDABuilder.createDefault(token, intents)
                 .enableCache(CacheFlag.VOICE_STATE)
                 .setMemberCachePolicy(MemberCachePolicy.VOICE)
                 .disableCache(
                         CacheFlag.EMOJI, CacheFlag.STICKER, CacheFlag.SOUNDBOARD_SOUNDS, CacheFlag.SCHEDULED_EVENTS)
                 .setAudioModuleConfig(audioModuleConfig)
-                .addEventListeners(new DiscordCommandListener(prefix, sttProvider, defaultMeetingId))
+                .addEventListeners(new DiscordCommandListener(prefix, sttProvider, defaultMeetingId, redisPublisher))
                 .build()
                 .awaitReady();
 

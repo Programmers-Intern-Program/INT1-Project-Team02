@@ -72,6 +72,8 @@ public class BotSttListener implements SttListener {
     private final AtomicReference<ScheduledFuture<?>> pendingPartialTask = new AtomicReference<>();
     private final AtomicReference<String> pendingPartialText = new AtomicReference<>("");
     private final AtomicLong pendingPartialVersion = new AtomicLong();
+    private final AtomicLong partialSequence = new AtomicLong();
+    private final RedisPublisher redisPublisher;
 
     public BotSttListener(long meetingId, String speakerDiscordId, String speakerName) {
         this(meetingId, speakerDiscordId, speakerName, null);
@@ -87,6 +89,16 @@ public class BotSttListener implements SttListener {
             String speakerName,
             MessageChannel captionChannel,
             Supplier<SessionQualitySnapshot> qualitySnapshotSupplier) {
+        this(meetingId, speakerDiscordId, speakerName, captionChannel, qualitySnapshotSupplier, null);
+    }
+
+    public BotSttListener(
+            long meetingId,
+            String speakerDiscordId,
+            String speakerName,
+            MessageChannel captionChannel,
+            Supplier<SessionQualitySnapshot> qualitySnapshotSupplier,
+            RedisPublisher redisPublisher) {
         this.meetingId = meetingId;
         this.speakerDiscordId = speakerDiscordId;
         this.speakerName = normalizeSpeakerName(speakerName, speakerDiscordId);
@@ -95,6 +107,7 @@ public class BotSttListener implements SttListener {
         this.captionChannel = captionChannel;
         this.qualitySnapshotSupplier =
                 qualitySnapshotSupplier == null ? SessionQualitySnapshot::empty : qualitySnapshotSupplier;
+        this.redisPublisher = redisPublisher;
     }
 
     @Override
@@ -260,6 +273,7 @@ public class BotSttListener implements SttListener {
                     String latest = pendingPartialText.getAndSet("");
                     if (latest != null && !latest.isBlank()) {
                         upsertLiveCaption(latest, false);
+                        publishPartialToRedis(latest);
                     }
                     pendingPartialTask.set(null);
                 },
@@ -268,6 +282,19 @@ public class BotSttListener implements SttListener {
 
         if (previous != null) {
             previous.cancel(false);
+        }
+    }
+
+    private void publishPartialToRedis(String text) {
+        if (redisPublisher == null) {
+            return;
+        }
+        try {
+            // TODO: meeting 종료 시 meetingId prefix key 일괄 제거 필요
+            long seq = partialSequence.incrementAndGet();
+            redisPublisher.publishPartial(meetingId, speakerDiscordId, speakerName, text, seq);
+        } catch (Exception e) {
+            log.warn("[Redis/partial전송실패] speakerId={}, meetingId={}, {}", speakerDiscordId, meetingId, e.getMessage());
         }
     }
 

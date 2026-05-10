@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.flodiback.bot.stt.BotSttListener;
+import com.flodiback.bot.stt.RedisPublisher;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.orctom.vad4j.VAD;
 
@@ -73,6 +74,7 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     private final ScheduledExecutorService silenceWatcher;
     private final ScheduledExecutorService sttIoExecutor;
     private final Guild guild;
+    private final RedisPublisher redisPublisher;
     private volatile MessageChannel captionChannel;
 
     // 사용자 ID별 누적 통계(튜닝/디버깅 지표)
@@ -118,10 +120,16 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
     }
 
     public PerUserAudioReceiveHandler(long guildId, Guild guild, SttProvider sttProvider, long meetingId) {
+        this(guildId, guild, sttProvider, meetingId, null);
+    }
+
+    public PerUserAudioReceiveHandler(
+            long guildId, Guild guild, SttProvider sttProvider, long meetingId, RedisPublisher redisPublisher) {
         this.guildId = guildId;
         this.guild = guild;
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.meetingId = meetingId;
+        this.redisPublisher = redisPublisher;
         this.silenceWatcher = Executors.newSingleThreadScheduledExecutor(new SilenceWatcherThreadFactory(guildId));
         this.sttIoExecutor = Executors.newSingleThreadScheduledExecutor(new SttIoThreadFactory(guildId));
         // 무음 종료 감시 스케줄러 시작
@@ -497,7 +505,8 @@ public class PerUserAudioReceiveHandler implements AudioReceiveHandler {
                             session.speakerId,
                             speakerName,
                             captionChannel,
-                            () -> buildQualitySnapshot(userId, session));
+                            () -> buildQualitySnapshot(userId, session),
+                            redisPublisher);
                     sttProvider.startSession(session.sessionId, session.speakerId, listener);
                     log.info(
                             "[STT/세션시작] guildId={}, meetingId={}, userId={}, sessionId={}, speakerName={}",

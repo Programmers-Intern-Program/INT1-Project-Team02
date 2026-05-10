@@ -38,6 +38,10 @@ spring:
     baseline-version: 1
     locations: classpath:db/migration
 
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
 openai:
   api-key: ${OPENAI_API_KEY}
   embedding:

@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
 import com.flodiback.bot.audio.PerUserAudioReceiveHandler;
+import com.flodiback.bot.stt.RedisPublisher;
 import com.flodiback.domain.speech.stt.SttProvider;
 import com.flodiback.domain.speech.stt.provider.openai.OpenAiSttProvider;
 
@@ -112,6 +113,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final String internalBaseUrl;
     private final String internalApiKey;
     private final Set<Long> allowedGuildIds;
+    private final String frontendBaseUrl;
     // 길드별 오디오 수신 핸들러 캐시
     private final Map<Long, PerUserAudioReceiveHandler> receiveHandlers = new ConcurrentHashMap<>();
     // 길드별 활성 meetingId
@@ -122,17 +124,25 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final Map<Long, ProjectCreationState> pendingProjectCreations = new ConcurrentHashMap<>();
     // 채널별 회의 시작 확인 대기 상태
     private final Map<Long, MeetingConfirmationState> pendingMeetingConfirmations = new ConcurrentHashMap<>();
+    private final RedisPublisher redisPublisher;
 
     public DiscordCommandListener() {
-        this("!", new OpenAiSttProvider(), 1L);
+        this("!", new OpenAiSttProvider(), 1L, null);
     }
 
     public DiscordCommandListener(String prefix, SttProvider sttProvider, long defaultMeetingId) {
+        this(prefix, sttProvider, defaultMeetingId, null);
+    }
+
+    public DiscordCommandListener(
+            String prefix, SttProvider sttProvider, long defaultMeetingId, RedisPublisher redisPublisher) {
         this.prefix = (prefix == null || prefix.isBlank()) ? "!" : prefix.trim();
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
         this.internalApiKey = BotEnv.get("INTERNAL_API_KEY");
         this.allowedGuildIds = parseAllowedGuildIds(BotEnv.get(ENV_ALLOWED_GUILD_IDS));
+        this.frontendBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("FRONTEND_BASE_URL", "http://localhost:5173"));
+        this.redisPublisher = redisPublisher;
     }
 
     @Override
@@ -216,7 +226,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         switch (event.getComponentId()) {
             case BUTTON_PANEL_OPEN -> {
                 event.replyEmbeds(buildFlodiPanelEmbed().build())
-                        .setComponents(buildFlodiPanelComponents())
+                        .setComponents(buildFlodiPanelComponents(
+                                event.getGuild(), event.getChannel().getIdLong()))
                         .setEphemeral(true)
                         .queue();
             }
@@ -317,11 +328,12 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .addField("회의", "음성 채널에 들어간 뒤 회의를 시작하면 STT 기록이 저장돼요.", false);
     }
 
-    private List<ActionRow> buildFlodiPanelComponents() {
+    private List<ActionRow> buildFlodiPanelComponents(Guild guild, long channelId) {
         return List.of(
                 ActionRow.of(
                         Button.secondary(BUTTON_DASHBOARD_VIEW, "대시보드"),
                         Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")),
+                buildWebDashboardLinkRow(guild, channelId),
                 ActionRow.of(
                         Button.primary(BUTTON_MEETING_START, "회의 시작"), Button.danger(BUTTON_MEETING_END, "회의 종료")));
     }
@@ -395,6 +407,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
         List<ActionRow> components = new ArrayList<>();
         components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
+        components.add(
+                buildWebDashboardLinkRow(event.getGuild(), event.getChannel().getIdLong()));
         if (projects != null && projects.isArray() && !projects.isEmpty()) {
             components.add(ActionRow.of(buildProjectSelectMenu(projects)));
         }
@@ -415,6 +429,8 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .sendMessage(message)
                 .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, connected)
                         .build())
+                .setComponents(buildWebDashboardLinkRow(
+                        event.getGuild(), event.getChannel().getIdLong()))
                 .setEphemeral(true)
                 .queue();
     }
@@ -428,6 +444,8 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .sendMessage(message)
                 .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, connected)
                         .build())
+                .setComponents(buildWebDashboardLinkRow(
+                        event.getGuild(), event.getChannel().getIdLong()))
                 .setEphemeral(true)
                 .queue();
     }
@@ -439,6 +457,8 @@ public class DiscordCommandListener extends ListenerAdapter {
                 .sendMessage(message)
                 .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, true)
                         .build())
+                .setComponents(buildWebDashboardLinkRow(
+                        event.getGuild(), event.getChannel().getIdLong()))
                 .setEphemeral(true)
                 .queue();
     }
@@ -464,6 +484,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
         List<ActionRow> components = new ArrayList<>();
         components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
+        components.add(buildWebDashboardLinkRow(guild, channel.getIdLong()));
         if (projects != null && projects.isArray() && !projects.isEmpty()) {
             components.add(ActionRow.of(buildProjectSelectMenu(projects)));
         }
@@ -484,6 +505,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         boolean connected = connectedProjectId != null && connectedProjectId == projectId;
         channel.sendMessageEmbeds(buildProjectDashboardEmbed(guild, project, decisions, connected)
                         .build())
+                .setComponents(buildWebDashboardLinkRow(guild, channel.getIdLong()))
                 .queue();
     }
 
@@ -797,7 +819,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void handleMeetingEnd(MessageReceivedEvent event) {
         MeetingEndResult result = endActiveMeeting(event.getGuild());
-        sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
+        sendMeetingEndMessage(event.getGuild(), event.getChannel(), result);
     }
 
     private MeetingEndResult endActiveMeeting(Guild guild) {
@@ -872,7 +894,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
 
             PerUserAudioReceiveHandler handler =
-                    new PerUserAudioReceiveHandler(ctx.guildId(), ctx.guild(), sttProvider, meetingId);
+                    new PerUserAudioReceiveHandler(ctx.guildId(), ctx.guild(), sttProvider, meetingId, redisPublisher);
             receiveHandlers.put(ctx.guildId(), handler);
             activeMeetingIdByGuild.put(ctx.guildId(), meetingId);
             handler.updateCaptionChannel(ctx.textChannel());
@@ -884,10 +906,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             ctx.audioManager().setSelfDeafened(false);
             ctx.audioManager().openAudioConnection(ctx.voiceChannel());
 
-            ctx.textChannel()
-                    .sendMessage(
-                            "회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")")
-                    .queue();
+            sendMeetingStartMessage(ctx, meetingId);
             log.info(
                     "[미팅/시작] guildId={}, meetingId={}, projectId={}, channel={}",
                     ctx.guildId(),
@@ -1115,6 +1134,35 @@ public class DiscordCommandListener extends ListenerAdapter {
         if (internalApiKey != null && !internalApiKey.isBlank()) {
             requestBuilder.header("X-Internal-Api-Key", internalApiKey);
         }
+    }
+
+    private void sendMeetingStartMessage(MeetingStartContext ctx, long meetingId) {
+        String content = "회의 시작! 음성 채널 [" + ctx.voiceChannel().getName() + "]에 입장했어요. (meetingId=" + meetingId + ")";
+
+        ctx.textChannel()
+                .sendMessage(content)
+                .setComponents(buildWebDashboardLinkRow(ctx.guild(), ctx.channelId()))
+                .queue();
+    }
+
+    private void sendMeetingEndMessage(Guild guild, MessageChannel channel, MeetingEndResult result) {
+        if (result.meetingId() == null) {
+            sendTemporaryMessage(channel, buildMeetingEndMessage(result));
+            return;
+        }
+
+        channel.sendMessage(buildMeetingEndMessage(result))
+                .setComponents(buildWebDashboardLinkRow(guild, channel.getIdLong()))
+                .queue();
+    }
+
+    private ActionRow buildWebDashboardLinkRow(Guild guild, long channelId) {
+        return ActionRow.of(Button.link(buildWebDashboardUrl(guild, channelId), "웹 대시보드 열기"));
+    }
+
+    private String buildWebDashboardUrl(Guild guild, long channelId) {
+        String guildId = guild.getId();
+        return frontendBaseUrl + "/channels/" + channelId + "/dashboard?server_id=" + guildId + "&guild_id=" + guildId;
     }
 
     private String normalizeBaseUrl(String baseUrl) {
