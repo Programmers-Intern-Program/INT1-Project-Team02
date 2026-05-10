@@ -43,7 +43,7 @@ class ProjectServiceTest {
     @Test
     void create_serverId없으면_server_null로_프로젝트생성() {
         // given
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", null, null);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", null, null, null);
         given(projectRepository.save(any(Project.class))).willAnswer(inv -> inv.getArgument(0));
 
         // when
@@ -63,7 +63,7 @@ class ProjectServiceTest {
         // given
         DiscordServer server =
                 DiscordServer.builder().guildId("guild-123").guildName("플로디 서버").build();
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 1L, null);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 1L, null, null);
         given(discordServerRepository.findById(1L)).willReturn(Optional.of(server));
         given(projectRepository.save(any(Project.class))).willAnswer(inv -> inv.getArgument(0));
 
@@ -79,7 +79,7 @@ class ProjectServiceTest {
     @Test
     void create_존재하지않는_serverId면_예외발생() {
         // given
-        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 999L, null);
+        CreateProjectRequest req = new CreateProjectRequest("플로디 프로젝트", "설명", "Java", 999L, null, null);
         given(discordServerRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
@@ -122,7 +122,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
 
         // when
-        ProjectResponse response = projectService.getById(1L);
+        ProjectResponse response = projectService.getById(1L, null);
 
         // then
         assertThat(response.name()).isEqualTo("플로디 프로젝트");
@@ -136,7 +136,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> projectService.getById(999L))
+        assertThatThrownBy(() -> projectService.getById(999L, null))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 프로젝트입니다.");
     }
@@ -155,7 +155,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
 
         // when
-        ProjectResponse response = projectService.update(1L, req);
+        ProjectResponse response = projectService.update(1L, req, null);
 
         // then
         assertThat(response.name()).isEqualTo("새 이름");
@@ -169,7 +169,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> projectService.update(999L, new UpdateProjectRequest("이름", null, null)))
+        assertThatThrownBy(() -> projectService.update(999L, new UpdateProjectRequest("이름", null, null), null))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 프로젝트입니다.");
     }
@@ -183,7 +183,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
 
         // when
-        projectService.delete(1L);
+        projectService.delete(1L, null);
 
         // then
         assertThat(project.getDeletedAt()).isNotNull();
@@ -195,7 +195,7 @@ class ProjectServiceTest {
         given(projectRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> projectService.delete(999L))
+        assertThatThrownBy(() -> projectService.delete(999L, null))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 프로젝트입니다.");
     }

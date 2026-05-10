@@ -105,7 +105,7 @@ class MeetingServiceTest {
         given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        MeetingDetailResponse response = meetingService.end(1L);
+        MeetingDetailResponse response = meetingService.end(1L, null);
 
         // then
         verify(meetingRepository).save(meeting);
@@ -122,7 +122,7 @@ class MeetingServiceTest {
         given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        MeetingDetailResponse response = meetingService.end(1L);
+        MeetingDetailResponse response = meetingService.end(1L, null);
 
         // then
         verify(meetingRepository).save(meeting);
@@ -135,7 +135,7 @@ class MeetingServiceTest {
         given(meetingRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> meetingService.end(999L))
+        assertThatThrownBy(() -> meetingService.end(999L, null))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 회의입니다.");
 
@@ -150,7 +150,7 @@ class MeetingServiceTest {
         given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        meetingService.end(1L);
+        meetingService.end(1L, null);
 
         // then
         verify(eventPublisher).publishEvent(any(MeetingEndedEvent.class));
@@ -162,7 +162,7 @@ class MeetingServiceTest {
         given(meetingRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> meetingService.end(999L)).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> meetingService.end(999L, null)).isInstanceOf(NoSuchElementException.class);
 
         verify(eventPublisher, never()).publishEvent(any());
     }
@@ -176,7 +176,7 @@ class MeetingServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
 
         // when
-        MeetingDetailResponse response = meetingService.getById(1L);
+        MeetingDetailResponse response = meetingService.getById(1L, null);
 
         // then
         assertThat(response.title()).isEqualTo("테스트 회의");
@@ -189,7 +189,7 @@ class MeetingServiceTest {
         given(meetingRepository.findById(999L)).willReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> meetingService.getById(999L))
+        assertThatThrownBy(() -> meetingService.getById(999L, null))
                 .isInstanceOf(NoSuchElementException.class)
                 .hasMessage("존재하지 않는 회의입니다.");
     }

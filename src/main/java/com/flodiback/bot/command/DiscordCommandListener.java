@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -104,16 +106,18 @@ public class DiscordCommandListener extends ListenerAdapter {
     private record MeetingEndResult(Long meetingId, boolean hadVoiceState) {}
 
     private record ProjectEditState(
-            ProjectCreationStep step, String name, String description, long projectId, long createdAt) {}
+            ProjectCreationStep step, String name, String description, long projectId, String userId, long createdAt) {}
 
-    private record ProjectDeletionState(long projectId, long createdAt) {}
+    private record ProjectDeletionState(long projectId, String userId, long createdAt) {}
 
-    private record MeetingDeletionState(long meetingId, long createdAt) {}
+    private record MeetingDeletionState(long meetingId, String userId, long createdAt) {}
 
     // 명령어 접두사. 기본값은 !.
     private final String prefix;
     // 실제 STT 엔진 구현체. 현재 기본값은 OpenAI.
     private final SttProvider sttProvider;
+    // HTTP 호출이 포함된 명령어를 JDA 이벤트 스레드 밖에서 처리하기 위한 스레드 풀
+    private final ExecutorService commandExecutor = Executors.newFixedThreadPool(4);
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String internalBaseUrl;
@@ -176,19 +180,19 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         // 프로젝트 수정 대화 중인 채널이면 먼저 처리
         if (pendingProjectEdits.containsKey(channelId)) {
-            new Thread(() -> handleProjectEditStep(event, channelId)).start();
+            commandExecutor.submit(() -> handleProjectEditStep(event, channelId));
             return;
         }
 
         // 프로젝트 삭제 확인 대기 중인 채널이면 먼저 처리
         if (pendingProjectDeletions.containsKey(channelId)) {
-            new Thread(() -> handleProjectDeletionStep(event, channelId)).start();
+            commandExecutor.submit(() -> handleProjectDeletionStep(event, channelId));
             return;
         }
 
         // 회의 삭제 확인 대기 중인 채널이면 먼저 처리
         if (pendingMeetingDeletions.containsKey(channelId)) {
-            new Thread(() -> handleMeetingDeletionStep(event, channelId)).start();
+            commandExecutor.submit(() -> handleMeetingDeletionStep(event, channelId));
             return;
         }
 
@@ -204,7 +208,14 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "join" -> handleJoin(event);
             case "leave" -> handleLeave(event);
             case "stats" -> handleStats(event);
+            case "help" -> handleHelp(event);
+            case "project" -> commandExecutor.submit(() -> handleProject(event, channelId));
             case "project start" -> handleProjectStart(event, channelId);
+            case "project list" -> commandExecutor.submit(() -> handleProjectList(event));
+            case "project end" -> commandExecutor.submit(() -> handleProjectEnd(event, channelId));
+            case "project edit" -> commandExecutor.submit(() -> handleProjectEdit(event, channelId));
+            case "project delete" -> handleProjectDelete(event, channelId);
+            case "meeting" -> handleMeeting(event);
             case "meeting start" -> {
                 Member member = event.getMember();
                 if (member == null
@@ -221,17 +232,17 @@ public class DiscordCommandListener extends ListenerAdapter {
                         event.getGuild().getAudioManager(),
                         event.getGuild(),
                         channelId);
-                new Thread(() -> handleMeetingStart(ctx)).start();
+                commandExecutor.submit(() -> handleMeetingStart(ctx));
             }
-            case "meeting list" -> new Thread(() -> handleMeetingList(event, channelId)).start();
+            case "meeting list" -> commandExecutor.submit(() -> handleMeetingList(event, channelId));
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
                 if (command.startsWith("project start ")) {
                     String arg = command.substring("project start ".length()).trim();
-                    new Thread(() -> handleProjectStartWithArg(event, channelId, arg)).start();
+                    commandExecutor.submit(() -> handleProjectStartWithArg(event, channelId, arg));
                 } else if (command.startsWith("meeting delete ")) {
                     String arg = command.substring("meeting delete ".length()).trim();
-                    new Thread(() -> handleMeetingDelete(event, arg)).start();
+                    commandExecutor.submit(() -> handleMeetingDelete(event, arg));
                 }
                 // 그 외 알 수 없는 명령은 조용히 무시
             }
@@ -273,7 +284,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case BUTTON_MEETING_END -> {
                 event.deferReply(true).queue();
-                MeetingEndResult result = endActiveMeeting(event.getGuild());
+                MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getUser().getId());
                 event.getHook()
                         .sendMessage(buildMeetingEndMessage(result))
                         .setEphemeral(true)
@@ -387,7 +398,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         Long projectId = fetchProjectIdByChannel(channelId);
         if (projectId != null) {
-            new Thread(() -> startMeeting(ctx, projectId)).start();
+            commandExecutor.submit(() -> startMeeting(ctx, projectId));
             event.getHook().sendMessage("회의 시작 요청을 처리했어요.").setEphemeral(true).queue();
             return;
         }
@@ -419,7 +430,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
-        new Thread(() -> startMeeting(state.ctx(), null)).start();
+        commandExecutor.submit(() -> startMeeting(state.ctx(), null));
         event.getHook().sendMessage("프로젝트 없이 회의를 시작할게요.").setEphemeral(true).queue();
     }
 
@@ -861,6 +872,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel/" + channelId))
                     .PUT(HttpRequest.BodyPublishers.noBody());
             attachInternalApiKey(connectReq);
+            attachRequesterHeader(connectReq, event.getAuthor().getId());
             HttpResponse<String> connectResp =
                     httpClient.send(connectReq.build(), HttpResponse.BodyHandlers.ofString());
             if (connectResp.statusCode() / 100 != 2) {
@@ -890,6 +902,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel"))
                     .DELETE();
             attachInternalApiKey(req);
+            attachRequesterHeader(req, event.getAuthor().getId());
             HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 != 2) {
                 event.getChannel().sendMessage("❌ 프로젝트 연결 해제에 실패했습니다.").queue();
@@ -914,7 +927,12 @@ public class DiscordCommandListener extends ListenerAdapter {
         pendingProjectEdits.put(
                 channelId,
                 new ProjectEditState(
-                        ProjectCreationStep.WAITING_NAME, null, null, projectId, System.currentTimeMillis()));
+                        ProjectCreationStep.WAITING_NAME,
+                        null,
+                        null,
+                        projectId,
+                        event.getAuthor().getId(),
+                        System.currentTimeMillis()));
         event.getChannel().sendMessage("새 프로젝트 이름을 입력해주세요. (건너뛰려면 '.')").queue();
     }
 
@@ -924,7 +942,8 @@ public class DiscordCommandListener extends ListenerAdapter {
             event.getChannel().sendMessage("이 채널에 연결된 프로젝트가 없어요.").queue();
             return;
         }
-        pendingProjectDeletions.put(channelId, new ProjectDeletionState(projectId, System.currentTimeMillis()));
+        pendingProjectDeletions.put(
+                channelId, new ProjectDeletionState(projectId, event.getAuthor().getId(), System.currentTimeMillis()));
         event.getChannel()
                 .sendMessage("⚠️ 정말로 프로젝트를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다. (yes / no)")
                 .queue();
@@ -953,6 +972,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                                 value,
                                 null,
                                 state.projectId(),
+                                state.userId(),
                                 state.createdAt()));
                 event.getChannel().sendMessage("설명을 입력해주세요. (건너뛰려면 '.')").queue();
             }
@@ -964,6 +984,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                                 state.name(),
                                 value,
                                 state.projectId(),
+                                state.userId(),
                                 state.createdAt()));
                 event.getChannel().sendMessage("기술 스택을 입력해주세요. (건너뛰려면 '.')").queue();
             }
@@ -980,6 +1001,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                             .header("Content-Type", "application/json")
                             .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
                     attachInternalApiKey(req);
+                    attachRequesterHeader(req, state.userId());
                     HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
                     if (response.statusCode() / 100 != 2) {
                         event.getChannel().sendMessage("❌ 프로젝트 수정에 실패했습니다.").queue();
@@ -1014,6 +1036,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                         .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + state.projectId()))
                         .DELETE();
                 attachInternalApiKey(req);
+                attachRequesterHeader(req, state.userId());
                 HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() / 100 != 2) {
                     event.getChannel().sendMessage("❌ 프로젝트 삭제에 실패했습니다.").queue();
@@ -1125,7 +1148,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         if ("yes".equals(input)) {
             MeetingStartContext ctx = state.ctx();
-            new Thread(() -> startMeeting(ctx, null)).start();
+            commandExecutor.submit(() -> startMeeting(ctx, null));
         } else if ("no".equals(input)) {
             event.getChannel().sendMessage("회의 시작을 취소했습니다.").queue();
         } else {
@@ -1136,11 +1159,11 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleMeetingEnd(MessageReceivedEvent event) {
-        MeetingEndResult result = endActiveMeeting(event.getGuild());
+        MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getAuthor().getId());
         sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 
-    private MeetingEndResult endActiveMeeting(Guild guild) {
+    private MeetingEndResult endActiveMeeting(Guild guild, String requesterId) {
         long guildId = guild.getIdLong();
         AudioManager audioManager = guild.getAudioManager();
         PerUserAudioReceiveHandler handler = receiveHandlers.remove(guildId);
@@ -1156,7 +1179,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         audioManager.setConnectionListener(null);
 
         if (meetingId != null) {
-            endMeeting(guildId, meetingId);
+            endMeeting(guildId, meetingId, requesterId);
         }
         log.info("[미팅/종료명령] guildId={}, meetingId={}, hadVoiceState={}", guildId, meetingId, hadVoiceState);
         return new MeetingEndResult(meetingId, hadVoiceState);
@@ -1214,7 +1237,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
 
         long channelId = event.getChannel().getIdLong();
-        pendingMeetingDeletions.put(channelId, new MeetingDeletionState(meetingId, System.currentTimeMillis()));
+        pendingMeetingDeletions.put(
+                channelId, new MeetingDeletionState(meetingId, event.getAuthor().getId(), System.currentTimeMillis()));
         event.getChannel()
                 .sendMessage("⚠️ 회의 (id=" + meetingId + ")를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다. (yes / no)")
                 .queue();
@@ -1240,6 +1264,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                         .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + state.meetingId()))
                         .DELETE();
                 attachInternalApiKey(req);
+                attachRequesterHeader(req, state.userId());
                 HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() / 100 != 2) {
                     event.getChannel().sendMessage("❌ 회의 삭제에 실패했습니다.").queue();
@@ -1355,6 +1380,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             else body.putNull("techStack");
             body.putNull("serverId");
             body.put("channelId", String.valueOf(channelId));
+            body.put("ownerDiscordId", event.getAuthor().getId());
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
@@ -1463,7 +1489,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleLeave(MessageReceivedEvent event) {
-        MeetingEndResult result = endActiveMeeting(event.getGuild());
+        MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getAuthor().getId());
         sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 
@@ -1526,12 +1552,13 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
     }
 
-    private void endMeeting(long guildId, long meetingId) {
+    private void endMeeting(long guildId, long meetingId, String requesterId) {
         try {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + meetingId + "/end"))
                     .PUT(HttpRequest.BodyPublishers.noBody());
             attachInternalApiKey(requestBuilder);
+            attachRequesterHeader(requestBuilder, requesterId);
 
             HttpResponse<String> response =
                     httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
@@ -1555,6 +1582,16 @@ public class DiscordCommandListener extends ListenerAdapter {
         if (internalApiKey != null && !internalApiKey.isBlank()) {
             requestBuilder.header("X-Internal-Api-Key", internalApiKey);
         }
+    }
+
+    private void attachRequesterHeader(HttpRequest.Builder builder, String userId) {
+        if (userId != null && !userId.isBlank()) {
+            builder.header("X-Requester-Id", userId);
+        }
+    }
+
+    private void attachGuildHeader(HttpRequest.Builder builder, long guildId) {
+        builder.header("X-Guild-Id", String.valueOf(guildId));
     }
 
     private String normalizeBaseUrl(String baseUrl) {
