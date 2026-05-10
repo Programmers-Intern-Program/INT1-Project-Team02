@@ -25,7 +25,7 @@ public class MeetingController {
     }
 
     @GetMapping
-    public RsData<List<MeetingDetailResponse>> getMeetings(@RequestParam(required = false) Long projectId) {
+    public RsData<List<MeetingDetailResponse>> getMeetings(@RequestParam Long projectId) {
         return RsData.of("200-1", "회의 목록 조회 성공.", service.getByProjectId(projectId));
     }
 

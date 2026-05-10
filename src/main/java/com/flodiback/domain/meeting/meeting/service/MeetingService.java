@@ -68,9 +68,9 @@ public class MeetingService {
 
     @Transactional(readOnly = true)
     public List<MeetingDetailResponse> getByProjectId(Long projectId) {
-        List<Meeting> meetings =
-                projectId != null ? meetingRepository.findByProjectId(projectId) : meetingRepository.findAll();
-        return meetings.stream().map(this::toDetailResponse).toList();
+        return meetingRepository.findByProjectId(projectId).stream()
+                .map(this::toDetailResponse)
+                .toList();
     }
 
     public void delete(Long id) {
