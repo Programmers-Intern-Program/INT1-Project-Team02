@@ -103,6 +103,8 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private record ProjectDeletionState(long projectId, long createdAt) {}
 
+    private record MeetingDeletionState(long meetingId, long createdAt) {}
+
     // 명령어 접두사. 기본값은 !.
     private final String prefix;
     // 실제 STT 엔진 구현체. 현재 기본값은 OpenAI.
@@ -123,6 +125,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final Map<Long, ProjectEditState> pendingProjectEdits = new ConcurrentHashMap<>();
     // 채널별 프로젝트 삭제 확인 대기 상태
     private final Map<Long, ProjectDeletionState> pendingProjectDeletions = new ConcurrentHashMap<>();
+    // 채널별 회의 삭제 확인 대기 상태
+    private final Map<Long, MeetingDeletionState> pendingMeetingDeletions = new ConcurrentHashMap<>();
 
     public DiscordCommandListener() {
         this("!", new OpenAiSttProvider(), 1L);
@@ -168,6 +172,12 @@ public class DiscordCommandListener extends ListenerAdapter {
             return;
         }
 
+        // 회의 삭제 확인 대기 중인 채널이면 먼저 처리
+        if (pendingMeetingDeletions.containsKey(channelId)) {
+            new Thread(() -> handleMeetingDeletionStep(event, channelId)).start();
+            return;
+        }
+
         String raw = event.getMessage().getContentRaw().trim();
         if (!raw.startsWith(prefix)) {
             return;
@@ -206,11 +216,15 @@ public class DiscordCommandListener extends ListenerAdapter {
                         channelId);
                 new Thread(() -> handleMeetingStart(ctx)).start();
             }
+            case "meeting list" -> new Thread(() -> handleMeetingList(event, channelId)).start();
             case "meeting end" -> handleMeetingEnd(event);
             default -> {
                 if (command.startsWith("project start ")) {
                     String arg = command.substring("project start ".length()).trim();
                     new Thread(() -> handleProjectStartWithArg(event, channelId, arg)).start();
+                } else if (command.startsWith("meeting delete ")) {
+                    String arg = command.substring("meeting delete ".length()).trim();
+                    new Thread(() -> handleMeetingDelete(event, arg)).start();
                 }
                 // 그 외 알 수 없는 명령은 조용히 무시
             }
@@ -1127,6 +1141,106 @@ public class DiscordCommandListener extends ListenerAdapter {
         endMeeting(guildId, meetingId);
         channel.sendMessage("회의가 종료됐습니다. 요약을 생성 중이에요...").queue();
         log.info("[미팅/종료명령] guildId={}, meetingId={}", guildId, meetingId);
+    }
+
+    private void handleMeetingList(MessageReceivedEvent event, long channelId) {
+        Long projectId = fetchProjectIdByChannel(channelId);
+        if (projectId == null) {
+            event.getChannel()
+                    .sendMessage("이 채널에 연결된 프로젝트가 없어요. `!project start {id}`로 프로젝트를 선택해주세요.")
+                    .queue();
+            return;
+        }
+        try {
+            HttpRequest.Builder req = HttpRequest.newBuilder()
+                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings?projectId=" + projectId))
+                    .GET();
+            attachInternalApiKey(req);
+            HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            if (!data.isArray() || data.isEmpty()) {
+                event.getChannel().sendMessage("📋 프로젝트에 등록된 회의가 없어요.").queue();
+                return;
+            }
+            StringBuilder sb = new StringBuilder("📋 **회의 목록** (projectId=" + projectId + ")\n");
+            for (JsonNode m : data) {
+                sb.append("`id=").append(m.path("id").asText()).append("` ");
+                sb.append(m.path("title").asText()).append(" | ");
+                sb.append(m.path("startedAt").asText("")).append(" ~ ");
+                sb.append(m.path("endedAt").asText("진행 중")).append("\n");
+            }
+            event.getChannel().sendMessage(sb.toString().trim()).queue();
+        } catch (Exception e) {
+            log.warn("[회의/목록예외] channelId={}", channelId, e);
+            event.getChannel().sendMessage("❌ 회의 목록 조회 중 오류가 발생했습니다.").queue();
+        }
+    }
+
+    private void handleMeetingDelete(MessageReceivedEvent event, String arg) {
+        long meetingId;
+        try {
+            meetingId = Long.parseLong(arg);
+        } catch (NumberFormatException e) {
+            event.getChannel().sendMessage("사용법: `!meeting delete {id}`").queue();
+            return;
+        }
+
+        long guildId = event.getGuild().getIdLong();
+        Long activeMeetingId = activeMeetingIdByGuild.get(guildId);
+        if (activeMeetingId != null && activeMeetingId == meetingId) {
+            event.getChannel()
+                    .sendMessage("진행 중인 회의는 삭제할 수 없어요. 먼저 `!meeting end`로 종료해주세요.")
+                    .queue();
+            return;
+        }
+
+        long channelId = event.getChannel().getIdLong();
+        pendingMeetingDeletions.put(channelId, new MeetingDeletionState(meetingId, System.currentTimeMillis()));
+        event.getChannel()
+                .sendMessage("⚠️ 회의 (id=" + meetingId + ")를 삭제하시겠어요? 이 작업은 되돌릴 수 없습니다. (yes / no)")
+                .queue();
+    }
+
+    private void handleMeetingDeletionStep(MessageReceivedEvent event, long channelId) {
+        MeetingDeletionState state = pendingMeetingDeletions.get(channelId);
+
+        if (System.currentTimeMillis() - state.createdAt() > PENDING_TTL_MS) {
+            pendingMeetingDeletions.remove(channelId);
+            event.getChannel()
+                    .sendMessage("⏰ 응답 시간이 초과됐습니다. 다시 `!meeting delete {id}`를 입력해주세요.")
+                    .queue();
+            return;
+        }
+
+        String input = event.getMessage().getContentRaw().trim().toLowerCase();
+        pendingMeetingDeletions.remove(channelId);
+
+        if ("yes".equals(input)) {
+            try {
+                HttpRequest.Builder req = HttpRequest.newBuilder()
+                        .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + state.meetingId()))
+                        .DELETE();
+                attachInternalApiKey(req);
+                HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() / 100 != 2) {
+                    event.getChannel().sendMessage("❌ 회의 삭제에 실패했습니다.").queue();
+                    return;
+                }
+                event.getChannel()
+                        .sendMessage("✅ 회의 (id=" + state.meetingId() + ")가 삭제됐습니다.")
+                        .queue();
+                log.info("[회의/삭제] meetingId={}", state.meetingId());
+            } catch (Exception e) {
+                log.warn("[회의/삭제예외] meetingId={}", state.meetingId(), e);
+                event.getChannel().sendMessage("❌ 회의 삭제 중 오류가 발생했습니다.").queue();
+            }
+        } else if ("no".equals(input)) {
+            event.getChannel().sendMessage("회의 삭제를 취소했습니다.").queue();
+        } else {
+            event.getChannel()
+                    .sendMessage("'yes' 또는 'no'로 답해주세요. 다시 `!meeting delete {id}`를 입력해주세요.")
+                    .queue();
+        }
     }
 
     private Long fetchProjectIdByChannel(long channelId) {
