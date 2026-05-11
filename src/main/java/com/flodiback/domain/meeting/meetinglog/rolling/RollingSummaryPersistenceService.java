@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -28,6 +29,7 @@ public class RollingSummaryPersistenceService {
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
     private final ContextCacheRepository contextCacheRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public Optional<CompressionCandidate> prepareCompression(Long meetingId) {
@@ -87,13 +89,24 @@ public class RollingSummaryPersistenceService {
             return;
         }
 
-        contextCacheRepository.save(ContextCache.builder()
+        ContextCache saved = contextCacheRepository.save(ContextCache.builder()
                 .meeting(meeting)
                 .version(candidate.nextVersion())
                 .compressedText(compressedText.strip())
                 .tokenCount(TokenEstimator.estimate(compressedText))
                 .compressedUntilUtteranceId(candidate.compressedUntilUtteranceId())
                 .build());
+
+        eventPublisher.publishEvent(
+                new RollingSummaryUpdatedEvent(candidate.meetingId(), saved.getCompressedText(), saved.getVersion()));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<RollingSummarySnapshot> getLatestSummary(Long meetingId) {
+        return meetingRepository
+                .findById(meetingId)
+                .flatMap(meeting -> contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
+                .map(cache -> new RollingSummarySnapshot(meetingId, cache.getCompressedText(), cache.getVersion()));
     }
 
     @Transactional(readOnly = true)
@@ -152,6 +165,8 @@ public class RollingSummaryPersistenceService {
                 """);
         return prompt.toString();
     }
+
+    public record RollingSummarySnapshot(Long meetingId, String summary, Integer version) {}
 
     record CompressionCandidate(
             Long meetingId,

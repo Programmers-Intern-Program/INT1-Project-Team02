@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
@@ -40,11 +41,15 @@ class RollingSummaryPersistenceServiceTest {
     @Mock
     private ContextCacheRepository contextCacheRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private RollingSummaryPersistenceService service;
 
     @BeforeEach
     void setUp() {
-        service = new RollingSummaryPersistenceService(meetingRepository, utteranceRepository, contextCacheRepository);
+        service = new RollingSummaryPersistenceService(
+                meetingRepository, utteranceRepository, contextCacheRepository, eventPublisher);
     }
 
     @Test
@@ -65,7 +70,7 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 20, 200));
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 12, 200));
 
         assertThat(service.prepareCompression(1L)).isEmpty();
     }
@@ -83,7 +88,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isNull();
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isNull();
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(11L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(19L);
         assertThat(candidate.userPrompt()).contains("content-1").doesNotContain("content-31");
         assertThat(candidate.userPrompt())
                 .contains("[출력]")
@@ -117,7 +122,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isEqualTo(3);
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isEqualTo(5L);
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(16L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(24L);
         assertThat(candidate.userPrompt()).contains("previous summary");
         assertThat(candidate.nextVersion()).isEqualTo(4);
     }
@@ -141,10 +146,10 @@ class RollingSummaryPersistenceServiceTest {
         RollingSummaryPersistenceService.CompressionCandidate candidate =
                 service.prepareCompression(1L).orElseThrow();
 
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(13L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(21L);
         assertThat(candidate.userPrompt())
                 .contains("content-3")
-                .contains("content-13")
+                .contains("content-21")
                 .doesNotContain("content-33");
     }
 
@@ -173,6 +178,7 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findByIdForUpdate(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
+        given(contextCacheRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
 
         service.saveCompression(candidate(null, null), "summary");
 
@@ -182,6 +188,7 @@ class RollingSummaryPersistenceServiceTest {
         assertThat(saved.getVersion()).isEqualTo(1);
         assertThat(saved.getCompressedText()).isEqualTo("summary");
         assertThat(saved.getCompressedUntilUtteranceId()).isEqualTo(11L);
+        verify(eventPublisher).publishEvent(new RollingSummaryUpdatedEvent(1L, "summary", 1));
     }
 
     private RollingSummaryPersistenceService.CompressionCandidate candidate(
