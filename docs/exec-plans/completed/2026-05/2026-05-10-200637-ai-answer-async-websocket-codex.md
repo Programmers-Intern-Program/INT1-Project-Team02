@@ -1,7 +1,7 @@
 # 2026-05-10-200637-ai-answer-async-websocket-codex
 
-- author: codex
-- status: completed
+- 작성자: codex
+- 상태: 완료(읽기 전용)
 - created-at: 2026-05-10 20:06:37
 
 ## Background
