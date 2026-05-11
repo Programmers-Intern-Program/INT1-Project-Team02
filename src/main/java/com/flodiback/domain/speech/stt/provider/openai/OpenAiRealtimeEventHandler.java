@@ -39,8 +39,8 @@ final class OpenAiRealtimeEventHandler {
                         session.speakerId(),
                         cumulative,
                         false,
-                        0L,
-                        0L,
+                        startMs(session),
+                        endMs(session),
                         sentPcmBytes,
                         audioDurationMs(sentPcmBytes),
                         null));
@@ -67,8 +67,8 @@ final class OpenAiRealtimeEventHandler {
                         session.speakerId(),
                         finalText,
                         true,
-                        0L,
-                        0L,
+                        startMs(session),
+                        endMs(session),
                         sentPcmBytes,
                         audioDurationMs(sentPcmBytes),
                         null));
@@ -81,6 +81,16 @@ final class OpenAiRealtimeEventHandler {
             return 0L;
         }
         return sentPcmBytes / REALTIME_PCM_BYTES_PER_MS;
+    }
+
+    private long startMs(OpenAiSttSessionState session) {
+        long firstAudioAtMs = session.firstAudioAtMs();
+        return firstAudioAtMs > 0 ? firstAudioAtMs : System.currentTimeMillis();
+    }
+
+    private long endMs(OpenAiSttSessionState session) {
+        long lastAudioAtMs = session.lastAudioAtMs();
+        return lastAudioAtMs > 0 ? lastAudioAtMs : startMs(session);
     }
 
     /**

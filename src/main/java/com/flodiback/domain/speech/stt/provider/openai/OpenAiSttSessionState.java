@@ -28,6 +28,9 @@ final class OpenAiSttSessionState {
 
     // 관측용 누적 PCM 바이트(디버깅/메트릭 용도)
     private final AtomicLong sentPcmBytes = new AtomicLong();
+    // 실제 STT로 전송한 첫/마지막 PCM 프레임 시각(ms)
+    private final AtomicLong firstAudioAtMs = new AtomicLong();
+    private final AtomicLong lastAudioAtMs = new AtomicLong();
     // endSession이 호출되었는지 상태 플래그
     private final AtomicBoolean endRequested = new AtomicBoolean(false);
 
@@ -58,12 +61,23 @@ final class OpenAiSttSessionState {
         return listener;
     }
 
-    void addSentPcmBytes(long bytes) {
+    void recordSentPcm(long bytes, long timestampMs) {
         sentPcmBytes.addAndGet(bytes);
+        long normalizedTimestampMs = timestampMs > 0 ? timestampMs : System.currentTimeMillis();
+        firstAudioAtMs.compareAndSet(0L, normalizedTimestampMs);
+        lastAudioAtMs.set(normalizedTimestampMs);
     }
 
     long sentPcmBytes() {
         return sentPcmBytes.get();
+    }
+
+    long firstAudioAtMs() {
+        return firstAudioAtMs.get();
+    }
+
+    long lastAudioAtMs() {
+        return lastAudioAtMs.get();
     }
 
     void markEndRequested() {
