@@ -48,6 +48,8 @@ glm:
     key: ${GLM_API_KEY:}
     model: ${GLM_MODEL:glm-5.1}
     url: ${GLM_API_URL:https://api.z.ai/api}
+    timeout-ms: ${GLM_TIMEOUT_MS:30000}
+    max-retries: ${GLM_MAX_RETRIES:1}
 
 springdoc:
   default-produces-media-type: application/json;charset=UTF-8

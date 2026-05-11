@@ -117,6 +117,18 @@ class SpeechAiAnswerServiceTest {
     }
 
     @Test
+    void generateAnswerIfCalled_acceptsMisrecognizedFlodiWakeWord() {
+        ContextResponse context = ContextResponse.noProject(null, List.of());
+        given(contextService.assemble(1L, "아까 말랑이 관련 이야기 요약 좀 해줄래?")).willReturn(context);
+        given(aiChatService.generateAnswer(anyString(), anyString())).willReturn("말랑이 관련 이야기를 요약했습니다.");
+
+        String result = speechAiAnswerService.generateAnswerIfCalled(1L, "플로디아 아까 말랑이 관련 이야기 요약 좀 해줄래?");
+
+        assertThat(result).isEqualTo("말랑이 관련 이야기를 요약했습니다.");
+        verify(contextService).assemble(1L, "아까 말랑이 관련 이야기 요약 좀 해줄래?");
+    }
+
+    @Test
     void generateAnswerIfCalled_returnsNull_whenQuestionIsBlank() {
         String result = speechAiAnswerService.generateAnswerIfCalled(1L, "플로디야!");
 

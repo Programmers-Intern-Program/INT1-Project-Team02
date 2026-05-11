@@ -16,7 +16,7 @@ export DISCORD_DEFAULT_MEETING_ID=1
 export INTERNAL_API_BASE_URL=http://localhost:8080
 export OPENAI_API_KEY=...
 export OPENAI_REALTIME_WS_URL='wss://api.openai.com/v1/realtime?intent=transcription'
-export OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+export OPENAI_TRANSCRIBE_MODEL=gpt-realtime-whisper
 export OPENAI_TRANSCRIBE_LANGUAGE=ko
 ```
 
