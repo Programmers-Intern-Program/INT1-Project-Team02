@@ -15,6 +15,7 @@ import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
+import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -47,9 +48,10 @@ public class MeetingService {
                 project != null);
     }
 
-    public MeetingDetailResponse end(Long id) {
+    public MeetingDetailResponse end(Long id, String requesterId) {
         Meeting meeting =
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
+        checkWritePermission(meeting, requesterId);
 
         meeting.end();
         meetingRepository.save(meeting);
@@ -59,24 +61,47 @@ public class MeetingService {
     }
 
     @Transactional(readOnly = true)
-    public MeetingDetailResponse getById(Long id) {
+    public MeetingDetailResponse getById(Long id, String guildId) {
         Meeting meeting =
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
-
+        checkReadPermission(meeting, guildId);
         return toDetailResponse(meeting);
     }
 
     @Transactional(readOnly = true)
-    public List<MeetingDetailResponse> getByProjectId(Long projectId) {
+    public List<MeetingDetailResponse> getByProjectId(Long projectId, String guildId) {
+        Project project =
+                projectRepository.findById(projectId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkReadPermission(project, guildId);
         return meetingRepository.findByProjectId(projectId).stream()
                 .map(this::toDetailResponse)
                 .toList();
     }
 
-    public void delete(Long id) {
+    public void delete(Long id, String requesterId) {
         Meeting meeting =
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
+        checkWritePermission(meeting, requesterId);
         meetingRepository.delete(meeting);
+    }
+
+    private void checkReadPermission(Meeting meeting, String guildId) {
+        checkReadPermission(meeting.getProject(), guildId);
+    }
+
+    private void checkReadPermission(Project project, String guildId) {
+        if (guildId == null || project == null || project.getServer() == null) return;
+        if (!guildId.equals(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+    }
+
+    private void checkWritePermission(Meeting meeting, String requesterId) {
+        Project project = meeting.getProject();
+        if (requesterId == null || project == null || project.getOwnerDiscordId() == null) return;
+        if (!requesterId.equals(project.getOwnerDiscordId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
     }
 
     private MeetingDetailResponse toDetailResponse(Meeting meeting) {

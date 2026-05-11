@@ -35,7 +35,8 @@ import com.flodiback.global.embedding.OpenAiEmbeddingClient;
         properties = {
             "spring.flyway.enabled=false",
             "spring.jpa.hibernate.ddl-auto=create-drop",
-            "openai.api-key=test-key"
+            "openai.api-key=test-key",
+            "internal.api-key=test-internal-key"
         })
 @AutoConfigureMockMvc
 class MeetingControllerTest {
@@ -99,7 +100,8 @@ class MeetingControllerTest {
         saveMeeting(project, "2차 개발 회의");
 
         mockMvc.perform(get("/api/v1/meetings")
-                        .param("projectId", project.getId().toString()))
+                        .param("projectId", project.getId().toString())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.length()").value(2))
@@ -111,7 +113,8 @@ class MeetingControllerTest {
     void deleteMeeting_회의를_삭제한다() throws Exception {
         Meeting meeting = saveMeeting(project, "삭제할 회의");
 
-        mockMvc.perform(delete("/api/v1/meetings/{id}", meeting.getId()))
+        mockMvc.perform(delete("/api/v1/meetings/{id}", meeting.getId())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
 

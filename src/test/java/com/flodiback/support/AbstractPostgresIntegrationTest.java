@@ -27,5 +27,6 @@ public abstract class AbstractPostgresIntegrationTest {
         // Flyway는 테스트에서 비활성화 (Hibernate create-drop이 스키마를 직접 관리)
         registry.add("spring.flyway.enabled", () -> "false");
         registry.add("openai.api-key", () -> "test-key");
+        registry.add("internal.api-key", () -> "test-internal-key");
     }
 }
