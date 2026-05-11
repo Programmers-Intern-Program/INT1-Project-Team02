@@ -75,8 +75,11 @@ public class OpenAiSttProvider implements SttProvider {
         }
         try {
             byte[] realtimePcm = pcmConverter.toRealtimePcm16(pcm16le);
+            if (realtimePcm.length == 0) {
+                return;
+            }
             pcmDebugDumper.capture(sessionId, pcm16le, realtimePcm);
-            session.addSentPcmBytes(realtimePcm.length);
+            session.recordSentPcm(realtimePcm.length, timestampMs);
             realtimeClient.appendAudio(session, realtimePcm, timestampMs);
         } catch (Exception exception) {
             session.sttListener().onError(sessionId, exception);

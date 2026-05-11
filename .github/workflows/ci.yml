@@ -15,11 +15,18 @@ jobs:
       GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
       GLM_MODEL: ${{ secrets.GLM_MODEL }}
       GLM_API_URL: ${{ secrets.GLM_API_URL }}
+      ORG_GRADLE_OPTS: -Dorg.gradle.java.installations.fromEnv=JAVA_HOME_25_X64
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 25 toolchain
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up JDK 21 for Gradle
         uses: actions/setup-java@v4
         with:
           java-version: '21'
