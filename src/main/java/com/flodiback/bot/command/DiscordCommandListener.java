@@ -210,12 +210,12 @@ public class DiscordCommandListener extends ListenerAdapter {
             case "stats" -> handleStats(event);
             case "help" -> handleHelp(event);
             case "project" -> commandExecutor.submit(() -> handleProject(event, channelId));
+            case "meeting" -> handleMeeting(event);
             case "project start" -> handleProjectStart(event, channelId);
             case "project list" -> commandExecutor.submit(() -> handleProjectList(event));
             case "project end" -> commandExecutor.submit(() -> handleProjectEnd(event, channelId));
             case "project edit" -> commandExecutor.submit(() -> handleProjectEdit(event, channelId));
-            case "project delete" -> handleProjectDelete(event, channelId);
-            case "meeting" -> handleMeeting(event);
+            case "project delete" -> commandExecutor.submit(() -> handleProjectDelete(event, channelId));
             case "meeting start" -> {
                 Member member = event.getMember();
                 if (member == null
