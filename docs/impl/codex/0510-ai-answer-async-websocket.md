@@ -1,3 +1,10 @@
+---
+generated-by: ai-draft
+reviewed-by: madupal
+reviewed-at: 2026-05-11
+evidence: PR 94
+---
+
 # 회의 중 AI 답변 비동기 WebSocket 전달
 
 > `/internal/v1/speech` 저장 응답과 AI 답변 생성을 분리하고, 웹 프론트엔드가 `/topic/meetings/{meetingId}/ai-answer`로 AI 답변 상태를 받을 수 있게 했다.

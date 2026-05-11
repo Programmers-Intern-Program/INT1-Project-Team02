@@ -1,3 +1,10 @@
+---
+generated-by: ai-draft
+reviewed-by: madupal
+reviewed-at: 2026-05-11
+evidence: PR 94
+---
+
 # OpenAI AI Chat Provider
 
 > 회의 중 AI 질문 경로에서 GLM과 OpenAI를 같은 `AiChatService` 인터페이스로 교체해 테스트할 수 있게 했다.
