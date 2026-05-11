@@ -34,7 +34,8 @@ import com.flodiback.global.embedding.OpenAiEmbeddingClient;
         properties = {
             "spring.flyway.enabled=false",
             "spring.jpa.hibernate.ddl-auto=create-drop",
-            "openai.api-key=test-key"
+            "openai.api-key=test-key",
+            "internal.api-key=test-internal-key"
         })
 @AutoConfigureMockMvc
 class ProjectControllerTest {

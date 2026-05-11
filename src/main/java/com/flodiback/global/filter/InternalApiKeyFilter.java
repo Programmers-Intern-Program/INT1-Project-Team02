@@ -15,8 +15,8 @@ import jakarta.servlet.http.HttpServletResponse;
 /**
  * 내부 API 키 검증 필터.
  *
- * <p>설정된 키가 없으면 검증을 스킵한다 (로컬 개발 편의 및 웹 확장 대비).
- * 키가 설정된 경우 X-Internal-Api-Key 헤더가 일치하지 않으면 403을 반환한다.
+ * <p>X-Internal-Api-Key 헤더가 설정된 키와 일치하지 않으면 403을 반환한다.
+ * 키는 앱 기동 시 반드시 설정되어야 한다 (미설정 시 기동 실패).
  */
 public class InternalApiKeyFilter extends OncePerRequestFilter {
 
@@ -32,11 +32,6 @@ public class InternalApiKeyFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (apiKey == null || apiKey.isBlank()) {
-            chain.doFilter(request, response);
-            return;
-        }
-
         String provided = request.getHeader(HEADER_NAME);
         if (!apiKey.equals(provided)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
