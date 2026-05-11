@@ -2,9 +2,8 @@ package com.flodiback.api.speech;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,6 +26,8 @@ import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.speech.service.AiAnswerWebSocketPublisher;
+import com.flodiback.domain.speech.service.SpeechAiAnswerAsyncService;
 import com.flodiback.domain.speech.service.SpeechAiAnswerService;
 import com.flodiback.global.enums.MeetingStatus;
 import com.flodiback.support.AbstractPostgresIntegrationTest;
@@ -50,11 +51,16 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
     @MockitoBean
     private SpeechAiAnswerService speechAiAnswerService;
 
+    @MockitoBean
+    private SpeechAiAnswerAsyncService speechAiAnswerAsyncService;
+
+    @MockitoBean
+    private AiAnswerWebSocketPublisher aiAnswerWebSocketPublisher;
+
     private Meeting meeting;
 
     @BeforeEach
     void setUp() {
-        // 발화 저장 테스트를 위해 최소 프로젝트와 회의를 먼저 만든다.
         Project project = Project.builder()
                 .name("Flodi")
                 .description("Discord AI 회의 에이전트")
@@ -73,16 +79,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void receiveSpeech_savesUtteranceFromSnakeCaseRequest() throws Exception {
-        String requestBody = """
-                {
-                  "meeting_id": %d,
-                  "speaker_discord_id": "123456789",
-                  "speaker_name": "김철수",
-                  "text": "이번 스프린트 목표를 어떻게 잡을까요?",
-                  "speech_started_at": "2026-04-23T10:30:00",
-                  "speech_ended_at": "2026-04-23T10:30:05"
-                }
-                """.formatted(meeting.getId());
+        String requestBody = requestBody("이번 스프린트 목표를 어떻게 잡을까요?");
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -125,16 +122,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
     @Test
     void receiveSpeech_returnsBadRequest_whenRequiredTextIsBlank() throws Exception {
-        String requestBody = """
-                {
-                  "meeting_id": %d,
-                  "speaker_discord_id": "123456789",
-                  "speaker_name": "김철수",
-                  "text": "",
-                  "speech_started_at": "2026-04-23T10:30:00",
-                  "speech_ended_at": "2026-04-23T10:30:05"
-                }
-                """.formatted(meeting.getId());
+        String requestBody = requestBody("");
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -144,82 +132,55 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void receiveSpeech_returnsAiAnswer_whenWakeWordIsIncluded() throws Exception {
-        given(speechAiAnswerService.generateAnswerIfCalled(anyLong(), anyString()))
-                .willReturn("인증 방식은 JWT로 결정했습니다.");
-
-        String requestBody = """
-                {
-                  "meeting_id": %d,
-                  "speaker_discord_id": "123456789",
-                  "speaker_name": "김철수",
-                  "text": "AI야, 인증 방식 뭐로 하기로 했지?",
-                  "speech_started_at": "2026-04-23T10:30:00",
-                  "speech_ended_at": "2026-04-23T10:30:05"
-                }
-                """.formatted(meeting.getId());
+    void receiveSpeech_triggersAsyncAiAnswer_whenWakeWordIsIncluded() throws Exception {
+        given(speechAiAnswerService.extractQuestion("AI야 인증 방식 뭐로 하기로 했어?")).willReturn("인증 방식 뭐로 하기로 했어?");
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody("AI야 인증 방식 뭐로 하기로 했어?")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
-                .andExpect(jsonPath("$.data.ai_answer").value("인증 방식은 JWT로 결정했습니다."));
+                .andExpect(jsonPath("$.data.ai_answer").value(nullValue()));
 
         List<Utterance> utterances = utteranceRepository.findAll();
         assertThat(utterances).hasSize(1);
-        assertThat(utterances.get(0).getContent()).isEqualTo("AI야, 인증 방식 뭐로 하기로 했지?");
-        verify(speechAiAnswerService).generateAnswerIfCalled(meeting.getId(), "AI야, 인증 방식 뭐로 하기로 했지?");
+        assertThat(utterances.get(0).getContent()).isEqualTo("AI야 인증 방식 뭐로 하기로 했어?");
+        verify(speechAiAnswerAsyncService)
+                .generateAndPublish(meeting.getId(), utterances.get(0).getId(), "123456789", "인증 방식 뭐로 하기로 했어?");
     }
 
     @Test
     void receiveSpeech_savesOnly_whenWakeWordHasNoQuestion() throws Exception {
-        String requestBody = """
-                {
-                  "meeting_id": %d,
-                  "speaker_discord_id": "123456789",
-                  "speaker_name": "김철수",
-                  "text": "AI야",
-                  "speech_started_at": "2026-04-23T10:30:00",
-                  "speech_ended_at": "2026-04-23T10:30:05"
-                }
-                """.formatted(meeting.getId());
+        given(speechAiAnswerService.extractQuestion("AI야!")).willReturn(null);
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody("AI야!")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.ai_answer").value(nullValue()));
 
         List<Utterance> utterances = utteranceRepository.findAll();
         assertThat(utterances).hasSize(1);
-        assertThat(utterances.get(0).getContent()).isEqualTo("AI야");
+        assertThat(utterances.get(0).getContent()).isEqualTo("AI야!");
+        verify(speechAiAnswerAsyncService, never())
+                .generateAndPublish(
+                        org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyLong(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString());
     }
 
-    @Test
-    void receiveSpeech_savesSpeech_whenAiAnswerIsNull() throws Exception {
-        String requestBody = """
+    private String requestBody(String text) {
+        return """
                 {
                   "meeting_id": %d,
                   "speaker_discord_id": "123456789",
                   "speaker_name": "김철수",
-                  "text": "봇아, 토큰 만료 시간 정했어?",
+                  "text": "%s",
                   "speech_started_at": "2026-04-23T10:30:00",
                   "speech_ended_at": "2026-04-23T10:30:05"
                 }
-                """.formatted(meeting.getId());
-
-        mockMvc.perform(post("/internal/v1/speech")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.resultCode").value("200-1"))
-                .andExpect(jsonPath("$.data.ai_answer").value(nullValue()));
-
-        List<Utterance> utterances = utteranceRepository.findAll();
-        assertThat(utterances).hasSize(1);
-        assertThat(utterances.get(0).getContent()).isEqualTo("봇아, 토큰 만료 시간 정했어?");
-        verify(speechAiAnswerService).generateAnswerIfCalled(meeting.getId(), "봇아, 토큰 만료 시간 정했어?");
+                """.formatted(meeting.getId(), text);
     }
 }

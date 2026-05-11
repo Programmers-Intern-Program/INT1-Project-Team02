@@ -8,6 +8,7 @@ spring:
     driver-class-name: org.postgresql.Driver
 
   jpa:
+    show-sql: false
     hibernate:
       ddl-auto: validate
     properties:
@@ -15,6 +16,10 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         default_batch_fetch_size: 100
 
-glm:
-  # 실제 GLM 호출은 .env에서 GLM_ENABLED=true로 켰을 때만 사용합니다.
-  enabled: ${GLM_ENABLED:false}
+logging:
+  level:
+    org.hibernate.orm.jdbc.bind: INFO
+    org.hibernate.orm.jdbc.extract: INFO
+    org.springframework.transaction.interceptor: INFO
+    com.back: INFO
+    org.springframework.security: INFO

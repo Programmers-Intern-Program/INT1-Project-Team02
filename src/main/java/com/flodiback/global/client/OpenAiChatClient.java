@@ -6,8 +6,10 @@ import java.util.function.Function;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
+import com.flodiback.global.config.AiProviderCondition.OpenAiProviderCondition;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.errors.OpenAIServiceException;
@@ -18,7 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Component
-public class GlmClient {
+@Conditional(OpenAiProviderCondition.class)
+public class OpenAiChatClient {
 
     private final Function<ChatCompletionCreateParams, ChatCompletion> completionRequester;
     private final String model;
@@ -26,20 +29,20 @@ public class GlmClient {
     private final int maxRetries;
 
     @Autowired
-    public GlmClient(
-            @Value("${glm.api.key}") String apiKey,
-            @Value("${glm.api.model}") String model,
-            @Value("${glm.api.url}") String apiUrl,
-            @Value("${glm.api.timeout-ms:30000}") long timeoutMs,
-            @Value("${glm.api.max-retries:1}") int maxRetries) {
-        this(model, timeoutMs, maxRetries, createCompletionRequester(apiKey, apiUrl, timeoutMs, maxRetries));
+    public OpenAiChatClient(
+            @Value("${openai.api-key}") String apiKey,
+            @Value("${openai.chat.model}") String model,
+            @Value("${openai.chat.base-url}") String baseUrl,
+            @Value("${openai.chat.timeout-ms:30000}") long timeoutMs,
+            @Value("${openai.chat.max-retries:0}") int maxRetries) {
+        this(model, timeoutMs, maxRetries, createCompletionRequester(apiKey, baseUrl, timeoutMs, maxRetries));
     }
 
-    GlmClient(String model, Function<ChatCompletionCreateParams, ChatCompletion> completionRequester) {
+    OpenAiChatClient(String model, Function<ChatCompletionCreateParams, ChatCompletion> completionRequester) {
         this(model, -1L, -1, completionRequester);
     }
 
-    GlmClient(
+    OpenAiChatClient(
             String model,
             long timeoutMs,
             int maxRetries,
@@ -51,16 +54,16 @@ public class GlmClient {
     }
 
     private static Function<ChatCompletionCreateParams, ChatCompletion> createCompletionRequester(
-            String apiKey, String apiUrl, long timeoutMs, int maxRetries) {
+            String apiKey, String baseUrl, long timeoutMs, int maxRetries) {
         log.info(
-                "GLM client initialized. url={}, keyLength={}, timeoutMs={}, maxRetries={}",
-                apiUrl,
+                "OpenAI chat client initialized. url={}, keyLength={}, timeoutMs={}, maxRetries={}",
+                baseUrl,
                 apiKey.length(),
                 timeoutMs,
                 maxRetries);
         OpenAIClient client = OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
-                .baseUrl(apiUrl)
+                .baseUrl(baseUrl)
                 .timeout(Duration.ofMillis(timeoutMs))
                 .maxRetries(maxRetries)
                 .build();
@@ -81,14 +84,14 @@ public class GlmClient {
             int choiceCount = completion.choices().size();
 
             if (choiceCount == 0) {
-                throw new IllegalStateException("GLM response has no choices.");
+                throw new IllegalStateException("OpenAI response has no choices.");
             }
 
             ChatCompletion.Choice firstChoice = completion.choices().get(0);
             String content = firstChoice.message().content().orElse("");
             long latencyMs = elapsedMillis(startedAtNanos);
             log.info(
-                    "GLM call succeeded. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, choiceCount={}, finishReason={}, responseChars={}",
+                    "OpenAI chat call succeeded. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, choiceCount={}, finishReason={}, responseChars={}",
                     model,
                     timeoutMs,
                     maxRetries,
@@ -104,7 +107,7 @@ public class GlmClient {
 
             if (e instanceof OpenAIServiceException serviceException) {
                 log.warn(
-                        "GLM call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}, statusCode={}, errorType={}, errorCode={}, errorParam={}, errorBodyPreview={}",
+                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}, statusCode={}, errorType={}, errorCode={}, errorParam={}, errorBodyPreview={}",
                         model,
                         timeoutMs,
                         maxRetries,
@@ -120,7 +123,7 @@ public class GlmClient {
                         preview(serviceException.body().toString(), 500));
             } else {
                 log.warn(
-                        "GLM call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}",
+                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}",
                         model,
                         timeoutMs,
                         maxRetries,

@@ -1,15 +1,16 @@
 package com.flodiback.domain.ai.service;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Service;
 
 import com.flodiback.global.client.GlmClient;
+import com.flodiback.global.config.AiProviderCondition.GlmProviderCondition;
 
 import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "glm", name = "enabled", havingValue = "true")
+@Conditional(GlmProviderCondition.class)
 public class GlmAiChatService implements AiChatService {
 
     private final GlmClient glmClient;

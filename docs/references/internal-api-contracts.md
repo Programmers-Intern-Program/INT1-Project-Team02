@@ -28,13 +28,38 @@ Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
   "data": {
     "utterance_id": 11,
     "meeting_id": 1,
-    "ai_answer": "네, 기존 결정사항 기준으로 인증 방식은 JWT를 사용하기로 했습니다."
+    "ai_answer": null
   }
 }
 ```
 
-- `ai_answer`는 호출어가 감지되어 AI 답변이 생성된 경우에만 문자열로 내려갑니다.
-- 호출어가 없거나 AI 답변 생성에 실패하면 `ai_answer`는 `null`입니다.
+- `ai_answer`는 하위 호환을 위해 유지하지만, AI 답변 전달 수단으로 사용하지 않습니다. 항상 `null`입니다.
+- 호출어가 감지된 경우 AI 답변은 비동기로 생성되어 WebSocket으로 전달됩니다.
+
+### AI answer delivery change
+
+- `/internal/v1/speech` no longer waits for AI answer generation.
+- Response `data.ai_answer` remains for backward compatibility but is always `null`.
+- If the speech text contains a wake word and question, the backend creates the AI answer asynchronously and publishes it to WebSocket topic `/topic/meetings/{meetingId}/ai-answer`.
+
+WebSocket payload:
+```json
+{
+  "meetingId": 1,
+  "utteranceId": 11,
+  "speakerDiscordId": "123456789",
+  "question": "인증 방식 뭐로 하기로 했어?",
+  "answer": "[회의 기반] 인증 방식은 JWT로 결정했습니다.",
+  "status": "COMPLETED",
+  "elapsedMs": 3200,
+  "createdAt": "2026-05-10T20:30:00"
+}
+```
+
+- `status`: `PENDING`, `COMPLETED`, `FALLBACK`
+- 5초 안에 완료되면 `COMPLETED`만 발행합니다.
+- 5초를 넘기면 먼저 `PENDING`을 발행하고, 이후 성공 시 `COMPLETED`, 실패/timeout 시 `FALLBACK`을 발행합니다.
+- `question`은 프론트엔드 표시와 caption 매핑을 위한 payload입니다. 서버 latency 로그에는 발화 원문을 남기지 않습니다.
 
 ## `GET /internal/v1/meetings/{meetingId}/context`
 회의 중 AI 답변용 컨텍스트를 조회합니다.

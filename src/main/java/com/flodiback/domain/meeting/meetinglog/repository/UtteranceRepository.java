@@ -14,4 +14,8 @@ public interface UtteranceRepository extends JpaRepository<Utterance, Long> {
     List<Utterance> findByMeetingOrderByIdAsc(Meeting meeting);
 
     List<Utterance> findByMeetingAndIdGreaterThanOrderByIdAsc(Meeting meeting, Long id);
+
+    List<Utterance> findTop30ByMeetingOrderByIdDesc(Meeting meeting);
+
+    List<Utterance> findTop30ByMeetingAndIdGreaterThanOrderByIdDesc(Meeting meeting, Long id);
 }

@@ -41,7 +41,7 @@ public interface DecisionRepository extends JpaRepository<Decision, Long> {
                         FROM semantic s
                         JOIN decisions d ON s.id = d.id
                     )
-                    SELECT d.*
+                    SELECT d.id, d.project_id, d.meeting_id, d.content, d.decided_at
                     FROM decisions d
                     JOIN combined c ON d.id = c.id
                     ORDER BY c.total_score DESC

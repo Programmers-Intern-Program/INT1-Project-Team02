@@ -18,7 +18,7 @@ public interface MeetingSummaryRepository extends JpaRepository<MeetingSummary, 
             @Param("projectId") Long projectId, @Param("currentMeetingId") Long currentMeetingId);
 
     @Query(value = """
-                    SELECT ms.*
+                    SELECT ms.id, ms.meeting_id, ms.summary, ms.unresolved_items, ms.is_confirmed, ms.created_at
                     FROM meeting_summaries ms
                     JOIN meetings m ON ms.meeting_id = m.id
                     WHERE m.project_id = :projectId
@@ -70,7 +70,7 @@ public interface MeetingSummaryRepository extends JpaRepository<MeetingSummary, 
                         FROM semantic s
                         JOIN meeting_summaries ms ON s.id = ms.id
                     )
-                    SELECT ms.*
+                    SELECT ms.id, ms.meeting_id, ms.summary, ms.unresolved_items, ms.is_confirmed, ms.created_at
                     FROM meeting_summaries ms
                     JOIN combined c ON ms.id = c.id
                     ORDER BY c.total_score DESC

@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,9 +48,9 @@ public class ContextService {
 
     private static final double SEMANTIC_WEIGHT = 0.7;
     private static final double KEYWORD_WEIGHT = 0.3;
-    private static final int TOP_K = 5;
-    private static final int UNCOMPRESSED_TOKEN_BUDGET = 2000;
-    private static final int MIN_RECENT_UTTERANCE_COUNT = 20;
+    private static final int TOP_K = 3;
+    private static final int UNCOMPRESSED_TOKEN_BUDGET = 1200;
+    private static final int MIN_RECENT_UTTERANCE_COUNT = 10;
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
@@ -83,18 +84,37 @@ public class ContextService {
     }
 
     private ShortTermParts resolveShortTerm(Meeting meeting) {
+        long startedAtNanos = System.nanoTime();
         ContextCache latestCache = contextCacheRepository
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         if (latestCache == null) {
-            List<Utterance> utterances = utteranceRepository.findByMeetingOrderByIdAsc(meeting);
-            return new ShortTermParts(null, sortForPrompt(fitToTokenBudget(utterances)));
+            List<Utterance> fetched = utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting);
+            List<Utterance> recentUtterances = selectRecentUtterances(fetched);
+            logShortTerm(meeting.getId(), startedAtNanos, false, fetched.size(), recentUtterances.size());
+            return new ShortTermParts(null, recentUtterances);
         }
 
-        List<Utterance> utterancesAfterCache = utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(
+        List<Utterance> fetched = utteranceRepository.findTop30ByMeetingAndIdGreaterThanOrderByIdDesc(
                 meeting, latestCache.getCompressedUntilUtteranceId());
-        return new ShortTermParts(
-                latestCache.getCompressedText(), sortForPrompt(fitToTokenBudget(utterancesAfterCache)));
+        List<Utterance> recentUtterances = selectRecentUtterances(fetched);
+        logShortTerm(meeting.getId(), startedAtNanos, true, fetched.size(), recentUtterances.size());
+        return new ShortTermParts(latestCache.getCompressedText(), recentUtterances);
+    }
+
+    private List<Utterance> selectRecentUtterances(List<Utterance> utterances) {
+        return fitToTokenBudget(sortForPrompt(utterances));
+    }
+
+    private void logShortTerm(
+            Long meetingId, long startedAtNanos, boolean hasCache, int fetchedUtterances, int selectedUtterances) {
+        log.info(
+                "shortTerm context resolved. meetingId={}, elapsedMs={}, hasCache={}, fetchedUtterances={}, selectedUtterances={}",
+                meetingId,
+                elapsedMillis(startedAtNanos),
+                hasCache,
+                fetchedUtterances,
+                selectedUtterances);
     }
 
     private List<Utterance> fitToTokenBudget(List<Utterance> utterances) {
@@ -182,8 +202,14 @@ public class ContextService {
 
         String embeddingStr;
         try {
+            long embeddingStartedAtNanos = System.nanoTime();
             float[] raw = embeddingClient.embed(question);
             embeddingStr = new PGvector(raw).getValue();
+            log.info(
+                    "questionContext embedding completed. projectId={}, meetingId={}, elapsedMs={}",
+                    projectId,
+                    meetingId,
+                    elapsedMillis(embeddingStartedAtNanos));
         } catch (Exception e) {
             log.warn(
                     "questionContext embedding failed, returning empty context - projectId={}: {}",
@@ -205,38 +231,65 @@ public class ContextService {
 
     private List<Decision> resolveDecisions(
             Long projectId, String question, String embeddingStr, MeetingStartContext startContext) {
+        long startedAtNanos = System.nanoTime();
         try {
             Set<Long> startDecisionIds = startContext.recentDecisions().stream()
-                    .map(decision -> decision.id())
+                    .map(DecisionSummary::id)
                     .filter(Objects::nonNull)
                     .collect(java.util.stream.Collectors.toSet());
-            return decisionRepository
-                    .hybridSearch(projectId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT)
-                    .stream()
-                    .filter(decision -> !startDecisionIds.contains(decision.getId()))
-                    .toList();
+            List<Decision> result =
+                    decisionRepository
+                            .hybridSearch(projectId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT)
+                            .stream()
+                            .filter(decision -> !startDecisionIds.contains(decision.getId()))
+                            .toList();
+            log.info(
+                    "questionContext decision search completed. projectId={}, elapsedMs={}, resultCount={}",
+                    projectId,
+                    elapsedMillis(startedAtNanos),
+                    result.size());
+            return result;
         } catch (Exception e) {
-            log.warn("하이브리드 서치 실패, questionContext 결정사항을 비웁니다 - projectId={}: {}", projectId, e.getMessage());
+            log.warn(
+                    "questionContext decision search failed, returning empty context - projectId={}: {}",
+                    projectId,
+                    e.getMessage());
             return Collections.emptyList();
         }
     }
 
     private List<MeetingSummary> resolvePastSummaries(
             Long projectId, Long meetingId, String question, String embeddingStr, MeetingStartContext startContext) {
+        long startedAtNanos = System.nanoTime();
         try {
             Set<Long> startSummaryIds = startContext.recentSummaries().stream()
-                    .map(summary -> summary.id())
+                    .map(PastSummary::id)
                     .filter(Objects::nonNull)
                     .collect(java.util.stream.Collectors.toSet());
-            return meetingSummaryRepository
+            List<MeetingSummary> result = meetingSummaryRepository
                     .hybridSearch(projectId, meetingId, embeddingStr, question, TOP_K, SEMANTIC_WEIGHT, KEYWORD_WEIGHT)
                     .stream()
                     .filter(summary -> !startSummaryIds.contains(summary.getId()))
                     .toList();
+            log.info(
+                    "questionContext summary search completed. projectId={}, meetingId={}, elapsedMs={}, resultCount={}",
+                    projectId,
+                    meetingId,
+                    elapsedMillis(startedAtNanos),
+                    result.size());
+            return result;
         } catch (Exception e) {
-            log.warn("회의 요약 하이브리드 서치 실패, questionContext 요약을 비웁니다 - projectId={}: {}", projectId, e.getMessage());
+            log.warn(
+                    "questionContext summary search failed, returning empty context - projectId={}, meetingId={}: {}",
+                    projectId,
+                    meetingId,
+                    e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 
     private record ShortTermParts(String rollingSummary, List<Utterance> recentUtterances) {}

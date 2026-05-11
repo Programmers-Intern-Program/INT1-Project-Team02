@@ -16,54 +16,54 @@ import com.openai.models.ErrorObject;
 import com.openai.models.chat.completions.ChatCompletion;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 
-class GlmClientTest {
+class OpenAiChatClientTest {
 
     @Test
     void chat_returnsFirstChoiceContent() {
-        GlmClient glmClient = new GlmClient("glm-test", params -> completion("안녕하세요."));
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", params -> completion("answer"));
 
-        String result = glmClient.chat("system", "user");
+        String result = openAiChatClient.chat("system", "user");
 
-        assertThat(result).isEqualTo("안녕하세요.");
+        assertThat(result).isEqualTo("answer");
     }
 
     @Test
     void chat_throwsException_whenChoicesIsEmpty() {
-        GlmClient glmClient = new GlmClient("glm-test", params -> emptyCompletion());
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", params -> emptyCompletion());
 
-        assertThatThrownBy(() -> glmClient.chat("system", "user"))
+        assertThatThrownBy(() -> openAiChatClient.chat("system", "user"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("choices");
     }
 
     @Test
-    void chat_rethrowsException_whenGlmCallFails() {
-        GlmClient glmClient = new GlmClient("glm-test", params -> {
+    void chat_rethrowsException_whenOpenAiCallFails() {
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", params -> {
             throw new IllegalStateException("network error");
         });
 
-        assertThatThrownBy(() -> glmClient.chat("system", "user"))
+        assertThatThrownBy(() -> openAiChatClient.chat("system", "user"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("network error");
     }
 
     @Test
-    void chat_rethrowsIoException_whenGlmCallFails() {
-        GlmClient glmClient = new GlmClient("glm-test", 15000L, 0, params -> {
+    void chat_rethrowsIoException_whenOpenAiCallFails() {
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", 30000L, 0, params -> {
             throw new OpenAIIoException("Request failed", new java.net.SocketTimeoutException("Read timed out"));
         });
 
-        assertThatThrownBy(() -> glmClient.chat("system", "user"))
+        assertThatThrownBy(() -> openAiChatClient.chat("system", "user"))
                 .isInstanceOf(OpenAIIoException.class)
                 .hasMessageContaining("Request failed");
     }
 
     @Test
-    void chat_rethrowsServiceException_whenGlmReturnsErrorStatus() {
+    void chat_rethrowsServiceException_whenOpenAiReturnsErrorStatus() {
         ErrorObject error = ErrorObject.builder()
                 .code("bad_request")
-                .message("unsupported parameter")
-                .param(Optional.of("max_completion_tokens"))
+                .message("invalid request")
+                .param(Optional.of("messages"))
                 .type("invalid_request_error")
                 .build();
         UnexpectedStatusCodeException exception = UnexpectedStatusCodeException.builder()
@@ -71,11 +71,11 @@ class GlmClientTest {
                 .headers(Headers.builder().build())
                 .error(error)
                 .build();
-        GlmClient glmClient = new GlmClient("glm-test", 15000L, 0, params -> {
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", 30000L, 0, params -> {
             throw exception;
         });
 
-        assertThatThrownBy(() -> glmClient.chat("system", "user"))
+        assertThatThrownBy(() -> openAiChatClient.chat("system", "user"))
                 .isInstanceOf(UnexpectedStatusCodeException.class)
                 .hasMessageContaining("400");
     }
@@ -84,7 +84,7 @@ class GlmClientTest {
         return ChatCompletion.builder()
                 .id("chatcmpl-test")
                 .created(0L)
-                .model("glm-test")
+                .model("openai-test")
                 .addChoice(ChatCompletion.Choice.builder()
                         .index(0)
                         .finishReason(ChatCompletion.Choice.FinishReason.STOP)
@@ -102,7 +102,7 @@ class GlmClientTest {
         return ChatCompletion.builder()
                 .id("chatcmpl-test")
                 .created(0L)
-                .model("glm-test")
+                .model("openai-test")
                 .choices(List.of())
                 .build();
     }
