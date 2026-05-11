@@ -7,6 +7,8 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -25,6 +27,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.flodiback.bot.BotEnv;
+import com.flodiback.domain.speech.service.AssistantCallExtractor;
 import com.flodiback.domain.speech.stt.SttListener;
 import com.flodiback.domain.speech.stt.SttResult;
 
@@ -39,9 +42,10 @@ import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
  */
 public class BotSttListener implements SttListener {
     private static final Logger log = LoggerFactory.getLogger(BotSttListener.class);
-    private static final List<String> WAKE_WORDS = List.of("AI야", "ai야", "봇아", "클로드야", "플로디야", "flodiya", "plodiya");
     private static final long CAPTION_DEBOUNCE_MS = 150L;
     private static final int CAPTION_MIN_CHARS = 2;
+    private static final int DISCORD_MESSAGE_LIMIT = 2000;
+    private static final String AI_ANSWER_HEADER = "**Flodi 답변**\n";
     private static final long STT_QUALITY_LOG_INTERVAL_MS = 60_000L;
     private static final ScheduledExecutorService CAPTION_DEBOUNCE_EXECUTOR =
             Executors.newSingleThreadScheduledExecutor(new CaptionDebounceThreadFactory());
@@ -200,7 +204,7 @@ public class BotSttListener implements SttListener {
                                 speakerDiscordId,
                                 meetingId,
                                 response.body());
-                        logAiAnswerStatus(result.sessionId(), text, response.body());
+                        handleAiAnswerResponse(result.sessionId(), text, response.body());
                     });
         } catch (Exception exception) {
             log.warn(
@@ -401,15 +405,12 @@ public class BotSttListener implements SttListener {
         clearLiveCaptionState();
     }
 
-    private void logAiAnswerStatus(String sessionId, String finalText, String responseBody) {
+    private void handleAiAnswerResponse(String sessionId, String finalText, String responseBody) {
         boolean wakeWordDetected = containsWakeWord(finalText);
         try {
-            JsonNode root = objectMapper.readTree(responseBody);
-            JsonNode aiAnswerNode = root.path("data").path("ai_answer");
-            boolean hasAiAnswer = !aiAnswerNode.isMissingNode()
-                    && !aiAnswerNode.isNull()
-                    && !aiAnswerNode.asText().isBlank();
-            int aiAnswerLength = hasAiAnswer ? aiAnswerNode.asText().length() : 0;
+            String aiAnswer = extractAiAnswer(responseBody);
+            boolean hasAiAnswer = aiAnswer != null;
+            int aiAnswerLength = hasAiAnswer ? aiAnswer.length() : 0;
             log.info(
                     "[AI/응답체크] sessionId={}, speakerId={}, meetingId={}, wakeWordDetected={}, hasAiAnswer={}, aiAnswerLength={}",
                     sessionId,
@@ -418,6 +419,9 @@ public class BotSttListener implements SttListener {
                     wakeWordDetected,
                     hasAiAnswer,
                     aiAnswerLength);
+            if (hasAiAnswer) {
+                sendAiAnswerToDiscord(sessionId, aiAnswer);
+            }
         } catch (Exception parseException) {
             log.warn(
                     "[AI/응답체크실패] sessionId={}, speakerId={}, meetingId={}, wakeWordDetected={}",
@@ -427,6 +431,88 @@ public class BotSttListener implements SttListener {
                     wakeWordDetected,
                     parseException);
         }
+    }
+
+    String extractAiAnswer(String responseBody) throws java.io.IOException {
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode aiAnswerNode = root.path("data").path("ai_answer");
+        if (aiAnswerNode.isMissingNode() || aiAnswerNode.isNull()) {
+            return null;
+        }
+
+        String aiAnswer = aiAnswerNode.asText();
+        if (aiAnswer == null || aiAnswer.isBlank()) {
+            return null;
+        }
+        return aiAnswer.strip();
+    }
+
+    private void sendAiAnswerToDiscord(String sessionId, String aiAnswer) {
+        if (captionChannel == null) {
+            log.info(
+                    "[AI/디스코드응답스킵] sessionId={}, speakerId={}, meetingId={}, reason=no_caption_channel",
+                    sessionId,
+                    speakerDiscordId,
+                    meetingId);
+            return;
+        }
+
+        List<String> chunks = splitAiAnswerForDiscord(aiAnswer);
+        for (int index = 0; index < chunks.size(); index++) {
+            String content = chunks.get(index);
+            int chunkIndex = index + 1;
+            captionChannel
+                    .sendMessage(content)
+                    .setAllowedMentions(Collections.emptySet())
+                    .queue(
+                            message -> log.info(
+                                    "[AI/디스코드응답전송완료] sessionId={}, speakerId={}, meetingId={}, messageId={}, chunk={}/{}, textLength={}",
+                                    sessionId,
+                                    speakerDiscordId,
+                                    meetingId,
+                                    message.getId(),
+                                    chunkIndex,
+                                    chunks.size(),
+                                    content.length()),
+                            throwable -> log.warn(
+                                    "[AI/디스코드응답전송실패] sessionId={}, speakerId={}, meetingId={}, chunk={}/{}",
+                                    sessionId,
+                                    speakerDiscordId,
+                                    meetingId,
+                                    chunkIndex,
+                                    chunks.size(),
+                                    throwable));
+        }
+    }
+
+    List<String> splitAiAnswerForDiscord(String aiAnswer) {
+        String content = AI_ANSWER_HEADER + aiAnswer.strip();
+        if (content.length() <= DISCORD_MESSAGE_LIMIT) {
+            return List.of(content);
+        }
+
+        int bodyLimit = DISCORD_MESSAGE_LIMIT - AI_ANSWER_HEADER.length();
+        List<String> chunks = new ArrayList<>();
+        String remaining = aiAnswer.strip();
+        boolean first = true;
+        while (!remaining.isEmpty()) {
+            int limit = first ? bodyLimit : DISCORD_MESSAGE_LIMIT;
+            int end = Math.min(limit, remaining.length());
+            if (end < remaining.length()) {
+                int newlineIndex = remaining.lastIndexOf('\n', end);
+                int spaceIndex = remaining.lastIndexOf(' ', end);
+                int splitIndex = Math.max(newlineIndex, spaceIndex);
+                if (splitIndex > 0) {
+                    end = splitIndex;
+                }
+            }
+
+            String chunkBody = remaining.substring(0, end).strip();
+            chunks.add(first ? AI_ANSWER_HEADER + chunkBody : chunkBody);
+            remaining = remaining.substring(end).strip();
+            first = false;
+        }
+        return chunks;
     }
 
     private void logFinalQuality(SttResult result, String text) {
@@ -469,15 +555,7 @@ public class BotSttListener implements SttListener {
     }
 
     private boolean containsWakeWord(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        for (String wakeWord : WAKE_WORDS) {
-            if (text.contains(wakeWord)) {
-                return true;
-            }
-        }
-        return false;
+        return AssistantCallExtractor.containsWakeWord(text);
     }
 
     private static final class CaptionDebounceThreadFactory implements ThreadFactory {
