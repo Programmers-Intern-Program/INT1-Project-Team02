@@ -1,5 +1,6 @@
 package com.flodiback.domain.meeting.meeting.service;
 
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.springframework.context.ApplicationEventPublisher;
@@ -63,6 +64,19 @@ public class MeetingService {
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
 
         return toDetailResponse(meeting);
+    }
+
+    @Transactional(readOnly = true)
+    public List<MeetingDetailResponse> getByProjectId(Long projectId) {
+        return meetingRepository.findByProjectId(projectId).stream()
+                .map(this::toDetailResponse)
+                .toList();
+    }
+
+    public void delete(Long id) {
+        Meeting meeting =
+                meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
+        meetingRepository.delete(meeting);
     }
 
     private MeetingDetailResponse toDetailResponse(Meeting meeting) {

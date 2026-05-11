@@ -62,6 +62,14 @@ public class Project {
         if (techStack != null) this.techStack = techStack;
     }
 
+    public void connectChannel(String channelId) {
+        this.channelId = channelId;
+    }
+
+    public void disconnectChannel() {
+        this.channelId = null;
+    }
+
     public void softDelete() {
         this.deletedAt = LocalDateTime.now();
     }

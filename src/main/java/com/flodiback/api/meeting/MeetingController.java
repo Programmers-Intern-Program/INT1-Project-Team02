@@ -1,5 +1,7 @@
 package com.flodiback.api.meeting;
 
+import java.util.List;
+
 import org.springframework.web.bind.annotation.*;
 
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
@@ -22,6 +24,11 @@ public class MeetingController {
         return RsData.of("201-1", "회의가 생성되었습니다.", service.create(req));
     }
 
+    @GetMapping
+    public RsData<List<MeetingDetailResponse>> getMeetings(@RequestParam Long projectId) {
+        return RsData.of("200-1", "회의 목록 조회 성공.", service.getByProjectId(projectId));
+    }
+
     @PutMapping("/{id}/end")
     public RsData<MeetingDetailResponse> endMeeting(@PathVariable Long id) {
         return RsData.of("200-1", "회의가 종료되었습니다.", service.end(id));
@@ -30,5 +37,11 @@ public class MeetingController {
     @GetMapping("/{id}")
     public RsData<MeetingDetailResponse> getMeeting(@PathVariable Long id) {
         return RsData.of("200-1", "회의 조회 성공.", service.getById(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public RsData<Void> deleteMeeting(@PathVariable Long id) {
+        service.delete(id);
+        return RsData.of("200-1", "회의가 삭제되었습니다.");
     }
 }
