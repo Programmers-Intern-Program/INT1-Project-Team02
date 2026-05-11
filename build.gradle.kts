@@ -124,6 +124,7 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    systemProperty("spring.profiles.active", "test")
 }
 
 // Spring 서버와 분리된 Discord 봇 실행 태스크
