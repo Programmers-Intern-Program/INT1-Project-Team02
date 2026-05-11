@@ -63,7 +63,7 @@ class OpenAiRealtimeEventHandlerTest {
 
         private SttResult onlyResult() {
             assertThat(results).hasSize(1);
-            return results.getFirst();
+            return results.get(0);
         }
     }
 }
