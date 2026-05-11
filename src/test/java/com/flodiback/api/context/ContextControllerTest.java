@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.flodiback.domain.meeting.meetinglog.dto.ContextResponse;
 import com.flodiback.domain.meeting.meetinglog.service.ContextService;
+import com.flodiback.global.auth.JwtProvider;
 import com.flodiback.global.config.SecurityConfig;
 
 @WebMvcTest(ContextController.class)
@@ -30,6 +31,9 @@ class ContextControllerTest {
 
     @MockitoBean
     private ContextService contextService;
+
+    @MockitoBean
+    private JwtProvider jwtProvider;
 
     private ContextResponse stubResponse;
 

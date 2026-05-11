@@ -99,7 +99,7 @@ class MeetingControllerTest {
         saveMeeting(project, "1차 기획 회의");
         saveMeeting(project, "2차 개발 회의");
 
-        mockMvc.perform(get("/api/v1/meetings")
+        mockMvc.perform(get("/internal/v1/meetings")
                         .param("projectId", project.getId().toString())
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
@@ -113,7 +113,7 @@ class MeetingControllerTest {
     void deleteMeeting_회의를_삭제한다() throws Exception {
         Meeting meeting = saveMeeting(project, "삭제할 회의");
 
-        mockMvc.perform(delete("/api/v1/meetings/{id}", meeting.getId())
+        mockMvc.perform(delete("/internal/v1/meetings/{id}", meeting.getId())
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));

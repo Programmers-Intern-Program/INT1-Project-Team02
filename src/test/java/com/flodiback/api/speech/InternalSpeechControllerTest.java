@@ -83,6 +83,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
@@ -115,6 +116,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
@@ -126,6 +128,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.resultCode").value("400-1"));
@@ -137,6 +140,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody("AI야 인증 방식 뭐로 하기로 했어?")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
@@ -155,6 +159,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody("AI야!")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))

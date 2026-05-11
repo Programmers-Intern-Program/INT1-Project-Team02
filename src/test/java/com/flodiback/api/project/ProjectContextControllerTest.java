@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flodiback.domain.meeting.meetinglog.dto.ActionItemRequest;
 import com.flodiback.domain.meeting.meetinglog.dto.UpdateContextRequest;
 import com.flodiback.domain.meeting.meetinglog.service.ContextService;
+import com.flodiback.global.auth.JwtProvider;
 import com.flodiback.global.config.SecurityConfig;
 
 @WebMvcTest(ProjectContextController.class)
@@ -34,6 +35,9 @@ class ProjectContextControllerTest {
 
     @MockitoBean
     private ContextService contextService;
+
+    @MockitoBean
+    private JwtProvider jwtProvider;
 
     @BeforeEach
     void setUp() {

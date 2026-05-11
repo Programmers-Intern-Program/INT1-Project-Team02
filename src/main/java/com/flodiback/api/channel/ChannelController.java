@@ -12,7 +12,7 @@ import com.flodiback.global.rsData.RsData;
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("api/v1/channels")
+@RequestMapping("/internal/v1/channels")
 @RequiredArgsConstructor
 public class ChannelController {
 
