@@ -83,6 +83,8 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    // EC2 배포 후 /actuator/health로 컨테이너 상태를 확인한다.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-aop")
     implementation("com.openai:openai-java:2.20.1")
     implementation("org.flywaydb:flyway-core")
