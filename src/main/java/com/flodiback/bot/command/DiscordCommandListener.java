@@ -284,7 +284,8 @@ public class DiscordCommandListener extends ListenerAdapter {
             }
             case BUTTON_MEETING_END -> {
                 event.deferReply(true).queue();
-                MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getUser().getId());
+                MeetingEndResult result =
+                        endActiveMeeting(event.getGuild(), event.getUser().getId());
                 event.getHook()
                         .sendMessage(buildMeetingEndMessage(result))
                         .setEphemeral(true)
@@ -1159,7 +1160,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleMeetingEnd(MessageReceivedEvent event) {
-        MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getAuthor().getId());
+        MeetingEndResult result =
+                endActiveMeeting(event.getGuild(), event.getAuthor().getId());
         sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 
@@ -1489,7 +1491,8 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void handleLeave(MessageReceivedEvent event) {
-        MeetingEndResult result = endActiveMeeting(event.getGuild(), event.getAuthor().getId());
+        MeetingEndResult result =
+                endActiveMeeting(event.getGuild(), event.getAuthor().getId());
         sendTemporaryMessage(event.getChannel(), buildMeetingEndMessage(result));
     }
 

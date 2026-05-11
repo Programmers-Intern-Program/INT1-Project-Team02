@@ -86,7 +86,8 @@ class ProjectControllerTest {
 
     @Test
     void connectChannel_채널을_프로젝트에_연결한다() throws Exception {
-        mockMvc.perform(put("/api/v1/projects/{id}/channel/{channelId}", project.getId(), "channel-123"))
+        mockMvc.perform(put("/api/v1/projects/{id}/channel/{channelId}", project.getId(), "channel-123")
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
 
@@ -99,7 +100,8 @@ class ProjectControllerTest {
         project.connectChannel("channel-123");
         projectRepository.save(project);
 
-        mockMvc.perform(delete("/api/v1/projects/{id}/channel", project.getId()))
+        mockMvc.perform(delete("/api/v1/projects/{id}/channel", project.getId())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
 
@@ -112,7 +114,8 @@ class ProjectControllerTest {
         project.connectChannel("channel-123");
         projectRepository.save(project);
 
-        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "channel-123"))
+        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "channel-123")
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.name").value("플로디"));
@@ -120,7 +123,8 @@ class ProjectControllerTest {
 
     @Test
     void getByChannelId_연결된_프로젝트가_없으면_404를_반환한다() throws Exception {
-        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "없는채널"))
+        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "없는채널")
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
     }
