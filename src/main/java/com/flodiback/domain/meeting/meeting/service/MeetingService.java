@@ -2,11 +2,13 @@ package com.flodiback.domain.meeting.meeting.service;
 
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.flodiback.domain.meeting.meeting.dto.ActiveMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.MeetingDetailResponse;
@@ -15,6 +17,7 @@ import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
+import com.flodiback.global.enums.MeetingStatus;
 import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -83,6 +86,15 @@ public class MeetingService {
                 meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
         checkWritePermission(meeting, requesterId);
         meetingRepository.delete(meeting);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<ActiveMeetingResponse> getActiveMeeting(String channelId) {
+        return projectRepository
+                .findByChannelId(channelId)
+                .flatMap(project -> meetingRepository.findFirstByProjectAndStatusOrderByStartedAtDesc(
+                        project, MeetingStatus.IN_PROGRESS))
+                .map(meeting -> new ActiveMeetingResponse(meeting.getId(), meeting.getTitle()));
     }
 
     private void checkReadPermission(Meeting meeting, String guildId) {

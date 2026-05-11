@@ -1,9 +1,11 @@
 package com.flodiback.global.embedding;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -17,8 +19,13 @@ public class OpenAiEmbeddingClient {
     private final RestClient restClient;
 
     public OpenAiEmbeddingClient(@Value("${openai.embedding.api-key}") String apiKey) {
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofSeconds(3));
+        requestFactory.setReadTimeout(Duration.ofSeconds(5));
+
         this.restClient = RestClient.builder()
                 .baseUrl("https://api.openai.com/v1")
+                .requestFactory(requestFactory)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();

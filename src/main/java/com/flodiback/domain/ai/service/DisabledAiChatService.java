@@ -1,12 +1,13 @@
 package com.flodiback.domain.ai.service;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Service;
 
+import com.flodiback.global.config.AiProviderCondition.DisabledProviderCondition;
 import com.flodiback.global.exception.ServiceException;
 
 @Service
-@ConditionalOnProperty(prefix = "glm", name = "enabled", havingValue = "false", matchIfMissing = true)
+@Conditional(DisabledProviderCondition.class)
 public class DisabledAiChatService implements AiChatService {
 
     @Override

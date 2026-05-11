@@ -10,6 +10,7 @@ services:
       - .env
     environment:
       ORG_GRADLE_JAVA_INSTALLATIONS_AUTO_DOWNLOAD: "true"
+      REDIS_HOST: host.docker.internal
     command: ["/bin/bash", "-lc", "./gradlew --no-daemon --console=plain runDiscordBot"]
     restart: "no"
 

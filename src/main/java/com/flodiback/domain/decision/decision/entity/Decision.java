@@ -6,7 +6,6 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.project.project.entity.Project;
-import com.pgvector.PGvector;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;
@@ -34,9 +33,6 @@ public class Decision {
 
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
-
-    @Column(name = "embedding", columnDefinition = "vector(1536)", insertable = false, updatable = false)
-    private PGvector embedding;
 
     @CreationTimestamp
     @Column(name = "decided_at", nullable = false, updatable = false)

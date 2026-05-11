@@ -104,6 +104,9 @@ dependencies {
     testCompileOnly("org.projectlombok:lombok")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testAnnotationProcessor("org.projectlombok:lombok")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("redis.clients:jedis:5.1.5")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("com.orctom:vad4j:1.0")
 
@@ -121,6 +124,7 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    systemProperty("spring.profiles.active", "test")
 }
 
 // Spring 서버와 분리된 Discord 봇 실행 태스크

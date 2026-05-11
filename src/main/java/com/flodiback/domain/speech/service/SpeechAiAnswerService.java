@@ -1,6 +1,7 @@
 package com.flodiback.domain.speech.service;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -23,39 +24,110 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SpeechAiAnswerService {
 
+    private static final int ROLLING_SUMMARY_MAX_CHARS = 800;
+    private static final int UNRESOLVED_ITEMS_MAX_CHARS = 400;
+    private static final int PROJECT_METADATA_MAX_CHARS = 300;
+    private static final int DECISION_CONTENT_MAX_CHARS = 250;
+    private static final int PAST_SUMMARY_MAX_CHARS = 400;
+    private static final int WORK_LOG_TASK_MAX_CHARS = 160;
+
     private static final String SYSTEM_PROMPT = """
             너는 Discord 회의에 참여하는 AI 회의 보조자야.
             항상 회의 컨텍스트를 먼저 확인하고 한국어로 2~3문장만 답해줘.
             회의 컨텍스트에 근거가 있으면 "[회의 기반]"으로 시작해 답해줘.
-            회의 컨텍스트에 답이 없거나 질문이 회의와 무관하면 "회의 내용에서는 해당 내용을 찾지 못했습니다."라고 먼저 말하고, 이어서 "[일반 지식 기반]"으로 네가 알고 있는 범위에서 간결하게 답해줘.
-            실제 웹 검색은 하지 않으므로 "웹에서 찾았다", "검색 결과에 따르면"처럼 외부 검색을 한 것처럼 말하지 마.
+            회의 컨텍스트에 답이 없거나 질문이 회의와 무관하면 "회의 내용에서는 해당 내용을 찾지 못했습니다."라고 먼저 말하고 이어서 "[일반 지식 기반]"으로 네가 알고 있는 범위에서 간결하게 답해줘.
+            실제 웹 검색은 하지 않으므로 "웹에서 찾아보니", "검색 결과에 따르면"처럼 외부 검색을 한 것처럼 말하지 마.
             """;
 
     private final ContextService contextService;
     private final AiChatService aiChatService;
 
-    public String generateAnswerIfCalled(Long meetingId, String speechText) {
-        String question = AssistantCallExtractor.extractQuestion(speechText);
-        if (!StringUtils.hasText(question)) {
-            return null;
-        }
-
+    public String generateAnswer(Long meetingId, String question) {
+        long totalStartedAtNanos = System.nanoTime();
+        long contextElapsedMs = -1L;
+        long promptElapsedMs = -1L;
+        long glmElapsedMs = -1L;
+        int promptChars = -1;
+        int recentUtteranceCount = -1;
+        int questionDecisionCount = -1;
+        int questionSummaryCount = -1;
         try {
-            ContextResponse context = contextService.assemble(meetingId, question);
-            String answer = aiChatService.generateAnswer(SYSTEM_PROMPT, buildUserPrompt(context, question));
+            long contextStartedAtNanos = System.nanoTime();
+            ContextResponse context;
+            try {
+                context = contextService.assemble(meetingId, question);
+            } finally {
+                contextElapsedMs = elapsedMillis(contextStartedAtNanos);
+            }
+
+            long promptStartedAtNanos = System.nanoTime();
+            String userPrompt;
+            try {
+                userPrompt = buildUserPrompt(context, question);
+            } finally {
+                promptElapsedMs = elapsedMillis(promptStartedAtNanos);
+            }
+            promptChars = userPrompt.length();
+            recentUtteranceCount = context.shortTerm().recentUtterances().size();
+            questionDecisionCount = context.questionContext().decisions().size();
+            questionSummaryCount = context.questionContext().pastSummaries().size();
+
+            log.info(
+                    "AI answer GLM call started. meetingId={}, promptChars={}, systemPromptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
+                    meetingId,
+                    promptChars,
+                    SYSTEM_PROMPT.length(),
+                    recentUtteranceCount,
+                    questionDecisionCount,
+                    questionSummaryCount);
+
+            long glmStartedAtNanos = System.nanoTime();
+            String answer;
+            try {
+                answer = aiChatService.generateAnswer(SYSTEM_PROMPT, userPrompt);
+            } finally {
+                glmElapsedMs = elapsedMillis(glmStartedAtNanos);
+            }
+            long totalElapsedMs = elapsedMillis(totalStartedAtNanos);
+
+            log.info(
+                    "AI answer generated. meetingId={}, totalMs={}, contextMs={}, promptMs={}, glmMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
+                    meetingId,
+                    totalElapsedMs,
+                    contextElapsedMs,
+                    promptElapsedMs,
+                    glmElapsedMs,
+                    promptChars,
+                    recentUtteranceCount,
+                    questionDecisionCount,
+                    questionSummaryCount);
+
             return StringUtils.hasText(answer) ? answer.strip() : null;
         } catch (RuntimeException e) {
-            // STT 원문 저장이 더 중요하므로 AI 답변 실패는 응답만 비우고 회의록 흐름은 유지합니다.
-            log.warn("AI 답변 생성에 실패했습니다. meetingId={}, reason={}", meetingId, e.getMessage());
+            log.warn(
+                    "AI answer generation failed. meetingId={}, totalMs={}, contextMs={}, promptMs={}, glmMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}, exceptionType={}, reason={}",
+                    meetingId,
+                    elapsedMillis(totalStartedAtNanos),
+                    contextElapsedMs,
+                    promptElapsedMs,
+                    glmElapsedMs,
+                    promptChars,
+                    recentUtteranceCount,
+                    questionDecisionCount,
+                    questionSummaryCount,
+                    e.getClass().getSimpleName(),
+                    e.getMessage());
             return null;
         }
     }
 
+    public String extractQuestion(String speechText) {
+        return AssistantCallExtractor.extractQuestion(speechText);
+    }
+
     private String buildUserPrompt(ContextResponse context, String question) {
-        // GLM이 회의 맥락을 함께 읽을 수 있도록 컨텍스트를 섹션별 텍스트로 정리합니다.
         StringBuilder prompt = new StringBuilder();
 
-        // 회의 맥락을 우선하되, 근거가 없으면 일반 지식 답변임을 표시하게 합니다.
         prompt.append("[답변 규칙]\n");
         prompt.append("- 회의 컨텍스트에 답이 있으면 [회의 기반]으로 답변\n");
         prompt.append("- 회의 컨텍스트에 답이 없거나 무관하면 회의 내용에 없다고 밝힌 뒤 [일반 지식 기반]으로 답변\n");
@@ -82,7 +154,9 @@ public class SpeechAiAnswerService {
     private void appendMeetingStartContext(StringBuilder prompt, MeetingStartContext context) {
         prompt.append("프로젝트명: ").append(valueOrNone(context.projectName())).append("\n");
         prompt.append("기술 스택: ").append(valueOrNone(context.techStack())).append("\n");
-        prompt.append("메타데이터: ").append(valueOrNone(context.metadata())).append("\n");
+        prompt.append("메타데이터: ")
+                .append(valueOrNone(truncate(context.metadata(), PROJECT_METADATA_MAX_CHARS)))
+                .append("\n");
 
         prompt.append("\n최근 결정사항:\n");
         appendDecisions(prompt, context.recentDecisions());
@@ -90,8 +164,8 @@ public class SpeechAiAnswerService {
         prompt.append("\n최근 회의 요약:\n");
         appendPastSummaries(prompt, context.recentSummaries());
 
-        prompt.append("\n미결 사항:\n");
-        appendTextBlock(prompt, context.unresolvedItems());
+        prompt.append("\n미해결 사항:\n");
+        appendTextBlock(prompt, truncate(context.unresolvedItems(), UNRESOLVED_ITEMS_MAX_CHARS));
 
         prompt.append("\n진행 중 작업:\n");
         appendWorkLogs(prompt, context.activeWorkLogs());
@@ -106,30 +180,26 @@ public class SpeechAiAnswerService {
     }
 
     private void appendDecisions(StringBuilder prompt, List<DecisionSummary> decisions) {
-        // 기존 결정사항은 프로젝트의 장기 기억으로, 회의 중 재확인 질문에 쓰입니다.
         if (decisions == null || decisions.isEmpty()) {
-            // 섹션을 비워두지 않고 "없음"을 넣어 GLM이 누락으로 오해하지 않게 합니다.
             prompt.append("- 없음\n");
             return;
         }
 
         decisions.forEach(decision -> prompt.append("- ")
-                .append(decision.content())
+                .append(truncate(decision.content(), DECISION_CONTENT_MAX_CHARS))
                 .append(" (")
                 .append(decision.decidedAt())
                 .append(")\n"));
     }
 
     private void appendPastSummaries(StringBuilder prompt, List<PastSummary> pastSummaries) {
-        // 과거 회의 요약은 현재 회의 이전에 정해진 맥락을 보충합니다.
         if (pastSummaries == null || pastSummaries.isEmpty()) {
-            // 과거 요약이 없는 경우에도 프롬프트 구조를 일정하게 유지합니다.
             prompt.append("- 없음\n");
             return;
         }
 
         pastSummaries.forEach(summary -> prompt.append("- ")
-                .append(summary.summary())
+                .append(truncate(summary.summary(), PAST_SUMMARY_MAX_CHARS))
                 .append(" (")
                 .append(summary.createdAt())
                 .append(")\n"));
@@ -140,13 +210,12 @@ public class SpeechAiAnswerService {
             prompt.append("- 없음\n");
             return;
         }
-        prompt.append(rollingSummary.strip()).append("\n");
+        prompt.append(truncate(rollingSummary, ROLLING_SUMMARY_MAX_CHARS).strip())
+                .append("\n");
     }
 
     private void appendRecentUtterances(StringBuilder prompt, List<UtteranceSummary> recentUtterances) {
-        // 최근 발화는 방금 진행 중인 회의의 단기 맥락으로 사용합니다.
         if (recentUtterances == null || recentUtterances.isEmpty()) {
-            // 최근 대화가 없어도 섹션 의미가 드러나도록 "없음"을 명시합니다.
             prompt.append("- 없음\n");
             return;
         }
@@ -173,7 +242,7 @@ public class SpeechAiAnswerService {
         }
 
         workLogs.forEach(workLog -> prompt.append("- ")
-                .append(workLog.task())
+                .append(truncate(workLog.task(), WORK_LOG_TASK_MAX_CHARS))
                 .append(" / 담당자: ")
                 .append(valueOrNone(workLog.assigneeName()))
                 .append(" / 기한: ")
@@ -184,7 +253,18 @@ public class SpeechAiAnswerService {
     }
 
     private String valueOrNone(String value) {
-        // 값이 비어 있으면 프롬프트에 null 대신 "없음"을 넣어 읽기 쉽게 만듭니다.
         return StringUtils.hasText(value) ? value : "없음";
+    }
+
+    private String truncate(String value, int maxChars) {
+        if (!StringUtils.hasText(value)) {
+            return value;
+        }
+        String stripped = value.strip();
+        return stripped.length() <= maxChars ? stripped : stripped.substring(0, maxChars) + "...";
+    }
+
+    private long elapsedMillis(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
     }
 }
