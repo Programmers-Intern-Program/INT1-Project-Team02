@@ -38,7 +38,8 @@ import com.flodiback.global.embedding.OpenAiEmbeddingClient;
         properties = {
             "spring.flyway.enabled=false",
             "spring.jpa.hibernate.ddl-auto=create-drop",
-            "openai.api-key=test-key"
+            "openai.api-key=test-key",
+            "internal.api-key=test-internal-key"
         })
 @AutoConfigureMockMvc
 class DecisionControllerTest {
@@ -113,7 +114,8 @@ class DecisionControllerTest {
         saveDecision(project, "배포는 AWS로 한다.");
         saveDecision(otherProject, "다른 프로젝트 결정사항");
 
-        mockMvc.perform(get("/api/v1/projects/{projectId}/decisions", project.getId()))
+        mockMvc.perform(get("/api/v1/projects/{projectId}/decisions", project.getId())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.length()").value(2))
@@ -131,7 +133,8 @@ class DecisionControllerTest {
 
         mockMvc.perform(post("/api/v1/projects/{projectId}/decisions", project.getId())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody)
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.resultCode").value("201-1"))
                 .andExpect(jsonPath("$.data.projectId").value(project.getId()))
@@ -155,7 +158,8 @@ class DecisionControllerTest {
 
         mockMvc.perform(put("/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody)
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
                 .andExpect(jsonPath("$.data.content").value("인증 방식은 JWT로 한다."));
@@ -168,8 +172,8 @@ class DecisionControllerTest {
     void deleteDecision_deletesOnlyProjectDecision() throws Exception {
         Decision decision = saveDecision(project, "삭제할 결정사항");
 
-        mockMvc.perform(delete(
-                        "/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId()))
+        mockMvc.perform(delete("/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
 
@@ -186,7 +190,8 @@ class DecisionControllerTest {
 
         mockMvc.perform(post("/api/v1/projects/{projectId}/decisions", 999999L)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody)
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
     }
@@ -203,7 +208,8 @@ class DecisionControllerTest {
 
         mockMvc.perform(put("/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody)
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
     }
@@ -212,8 +218,8 @@ class DecisionControllerTest {
     void deleteDecision_returnsNotFound_whenDecisionBelongsToAnotherProject() throws Exception {
         Decision decision = saveDecision(otherProject, "다른 프로젝트 결정사항");
 
-        mockMvc.perform(delete(
-                        "/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId()))
+        mockMvc.perform(delete("/api/v1/projects/{projectId}/decisions/{decisionId}", project.getId(), decision.getId())
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
     }
@@ -228,7 +234,8 @@ class DecisionControllerTest {
 
         mockMvc.perform(post("/api/v1/projects/{projectId}/decisions", project.getId())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
+                        .content(requestBody)
+                        .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.resultCode").value("400-1"));
     }

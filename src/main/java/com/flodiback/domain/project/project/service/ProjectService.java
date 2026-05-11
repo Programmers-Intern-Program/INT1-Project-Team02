@@ -42,6 +42,7 @@ public class ProjectService {
         Project project = Project.builder()
                 .server(server)
                 .channelId(req.channelId())
+                .ownerDiscordId(req.ownerDiscordId())
                 .name(req.name())
                 .description(req.description())
                 .techStack(req.techStack())
@@ -57,31 +58,63 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    public ProjectResponse getByChannelId(String channelId) {
-        return projectRepository
+    public ProjectResponse getByChannelId(String channelId, String guildId) {
+        Project project = projectRepository
                 .findByChannelId(channelId)
-                .map(this::toResponse)
-                .orElse(null);
-    }
-
-    @Transactional(readOnly = true)
-    public ProjectResponse getById(Long id) {
-        Project project =
-                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+                .orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkReadPermission(project, guildId);
         return toResponse(project);
     }
 
-    public ProjectResponse update(Long id, UpdateProjectRequest req) {
+    @Transactional(readOnly = true)
+    public ProjectResponse getById(Long id, String guildId) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkReadPermission(project, guildId);
+        return toResponse(project);
+    }
+
+    public ProjectResponse update(Long id, UpdateProjectRequest req, String requesterId) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkWritePermission(project, requesterId);
         project.update(req.name(), req.description(), req.techStack());
         return toResponse(project);
     }
 
-    public void delete(Long id) {
+    public void connectChannel(Long id, String channelId, String requesterId) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkWritePermission(project, requesterId);
+        project.connectChannel(channelId);
+    }
+
+    public void disconnectChannel(Long id, String requesterId) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkWritePermission(project, requesterId);
+        project.disconnectChannel();
+    }
+
+    public void delete(Long id, String requesterId) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        checkWritePermission(project, requesterId);
         project.softDelete();
+    }
+
+    private void checkReadPermission(Project project, String guildId) {
+        if (guildId == null || project.getServer() == null) return;
+        if (!guildId.equals(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+    }
+
+    private void checkWritePermission(Project project, String requesterId) {
+        if (requesterId == null || project.getOwnerDiscordId() == null) return;
+        if (!requesterId.equals(project.getOwnerDiscordId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
     }
 
     ProjectResponse toResponse(Project project) {

@@ -36,6 +36,9 @@ public class Project {
     @Column(name = "channel_id", length = 50)
     private String channelId;
 
+    @Column(name = "owner_discord_id", length = 50)
+    private String ownerDiscordId;
+
     @Column(name = "name", nullable = false, length = 100)
     private String name;
 
@@ -62,6 +65,14 @@ public class Project {
         if (techStack != null) this.techStack = techStack;
     }
 
+    public void connectChannel(String channelId) {
+        this.channelId = channelId;
+    }
+
+    public void disconnectChannel() {
+        this.channelId = null;
+    }
+
     public void softDelete() {
         this.deletedAt = LocalDateTime.now();
     }
@@ -70,12 +81,14 @@ public class Project {
     public Project(
             DiscordServer server,
             String channelId,
+            String ownerDiscordId,
             String name,
             String description,
             String techStack,
             String metadata) {
         this.server = server;
         this.channelId = channelId;
+        this.ownerDiscordId = ownerDiscordId;
         this.name = name;
         this.description = description;
         this.techStack = techStack;
