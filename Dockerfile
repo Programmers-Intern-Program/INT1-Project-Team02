@@ -78,6 +78,8 @@ EXPOSE 8080
 
 USER app
 
+# discord-bot 컨테이너가 이 이미지를 재사용하며 DAVE/VAD4J 네이티브 라이브러리를 로드합니다.
+# 해당 라이브러리가 unnamed module 네이티브 접근을 요구하므로 ALL-UNNAMED가 필요합니다.
 ENTRYPOINT ["java", \
   "--enable-native-access=ALL-UNNAMED", \
   "-XX:+UseSerialGC", \
