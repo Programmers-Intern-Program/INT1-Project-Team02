@@ -24,12 +24,12 @@ jobs:
             git checkout main
             git pull origin main
 
-  deploy:
-    name: 무중단 배포
+  build:
+    name: 빌드 및 헬스체크
     runs-on: ubuntu-latest
     needs: update-code
     steps:
-      - name: deploy-blue-green.sh 실행
+      - name: inactive 슬롯 빌드 및 앱 헬스체크
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -38,23 +38,53 @@ jobs:
           command_timeout: 10m
           script: |
             cd ~/INT1-Project-Team02
-            ./scripts/deploy-blue-green.sh
+            ./scripts/deploy-blue-green.sh build
+
+  switch-traffic:
+    name: 트래픽 전환
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: nginx upstream 전환 및 검증
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/INT1-Project-Team02
+            ./scripts/deploy-blue-green.sh switch
+
+  cleanup:
+    name: 정리 및 봇 재시작
+    runs-on: ubuntu-latest
+    needs: switch-traffic
+    steps:
+      - name: 이전 슬롯 종료 및 discord-bot 재시작
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/INT1-Project-Team02
+            ./scripts/deploy-blue-green.sh cleanup
 
   notify:
     name: Discord 알림
     runs-on: ubuntu-latest
-    needs: [ update-code, deploy ]
+    needs: [ update-code, build, switch-traffic, cleanup ]
     if: always()
     steps:
       - name: 배포 성공
-        if: ${{ needs.deploy.result == 'success' }}
+        if: ${{ needs.cleanup.result == 'success' }}
         run: |
           curl -s -H "Content-Type: application/json" \
             -d "{\"embeds\":[{\"title\":\"배포 완료 🚀\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":3066993}]}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
 
       - name: 배포 실패
-        if: ${{ needs.update-code.result == 'failure' || needs.deploy.result == 'failure' }}
+        if: ${{ contains(needs.*.result, 'failure') }}
         run: |
           curl -s -H "Content-Type: application/json" \
             -d "{\"embeds\":[{\"title\":\"배포 실패 ❌\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":15158332}]}" \

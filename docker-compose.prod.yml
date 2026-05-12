@@ -72,7 +72,8 @@ services:
     volumes:
       - npm_data:/data
     depends_on:
-      - nginx
+      nginx:
+        condition: service_healthy
 
   nginx:
     # NPM에서 넘어온 트래픽을 active app 슬롯(blue/green)으로 프록시한다.
@@ -81,6 +82,12 @@ services:
     restart: unless-stopped
     volumes:
       - ./deploy/nginx/conf.d:/etc/nginx/conf.d
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   app-blue:
     <<: *app-common
