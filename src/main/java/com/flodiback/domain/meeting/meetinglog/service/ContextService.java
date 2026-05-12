@@ -188,6 +188,7 @@ public class ContextService {
                             .meeting(meeting)
                             .project(project)
                             .assigneeName(item.assigneeName())
+                            .assigneeDiscordId(item.assigneeDiscordId())
                             .task(item.task())
                             .dueDate(item.dueDate())
                             .build()));

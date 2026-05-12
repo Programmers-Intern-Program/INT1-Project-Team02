@@ -279,7 +279,7 @@ class ContextServiceTest {
                 null,
                 List.of("decision-1", "decision-2"),
                 List.of(
-                        new ActionItemRequest("Alice", "write API", null),
+                        new ActionItemRequest("discord-alice", "Alice", "write API", null),
                         new ActionItemRequest("Bob", "test API", null)));
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
@@ -291,7 +291,11 @@ class ContextServiceTest {
 
         verify(decisionRepository, times(2)).save(any(Decision.class));
         verify(decisionEmbeddingService, times(2)).processEmbedding(any(Decision.class));
-        verify(workLogRepository, times(2)).save(any(WorkLog.class));
+        org.mockito.ArgumentCaptor<WorkLog> workLogCaptor = org.mockito.ArgumentCaptor.forClass(WorkLog.class);
+        verify(workLogRepository, times(2)).save(workLogCaptor.capture());
+        assertThat(workLogCaptor.getAllValues())
+                .extracting(WorkLog::getAssigneeDiscordId)
+                .containsExactly("discord-alice", null);
     }
 
     @Test
