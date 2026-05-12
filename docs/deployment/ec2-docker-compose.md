@@ -10,29 +10,33 @@
 
 ## 실행 구성
 
-- Spring Boot API: 외부 `8000` -> 컨테이너 `8080`
-- Discord bot: 별도 Java main class 실행
+- Nginx: 외부 `8000` -> active API 슬롯
+- Spring Boot API: `app-blue` / `app-green` blue-green 슬롯
+- Discord bot: 단일 Java main class 실행
 - PostgreSQL with pgvector: EC2 localhost에만 바인딩
 - Redis: EC2 localhost에만 바인딩
+
+Discord bot은 같은 토큰으로 두 프로세스를 동시에 띄우면 interaction 중복 처리가 발생할 수 있으므로 blue-green 대상에서 제외한다.
 
 ## First Server Setup
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git docker.io docker-compose-plugin
+sudo apt-get install -y git docker.io docker-compose-plugin awscli
 sudo usermod -aG docker ubuntu
 newgrp docker
 ```
 
-## Deploy
+## First Deploy
 
 ```bash
 git clone https://github.com/Programmers-Intern-Program/INT1-Project-Team02.git
 cd INT1-Project-Team02
+git checkout dev
 
 vi .env.prod
 
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+./scripts/deploy-blue-green.sh
 ```
 
 `.env.prod`는 서버에서 직접 만들고 Git에 올리지 않는다. 최소한 아래 값들은 실제 값으로 넣어야 한다.
@@ -65,18 +69,48 @@ The API is published on port `8000` by default.
 curl http://localhost:8000/actuator/health
 ```
 
-## Update Deployment
+## Zero-Downtime API Deploy
+
+업데이트 배포는 `docker compose up -d --build`를 직접 실행하지 않고 blue-green 스크립트로 수행한다.
 
 ```bash
 git pull
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+./scripts/deploy-blue-green.sh
+```
+
+스크립트 동작:
+
+1. 현재 Nginx upstream의 active 슬롯을 확인한다.
+2. inactive 슬롯에 새 API 컨테이너를 빌드하고 실행한다.
+3. inactive 슬롯의 `/actuator/health`가 `UP`인지 확인한다.
+4. Nginx upstream을 inactive 슬롯으로 전환하고 reload한다.
+5. Nginx 경유 `/actuator/health`가 `UP`인지 확인한다.
+6. 짧은 대기 후 이전 active 슬롯을 중지한다.
+7. Discord bot은 마지막에 단일 프로세스로 재시작한다.
+
+`deploy/nginx/conf.d/upstream.conf`는 스크립트가 생성하는 런타임 파일이며 Git에 올리지 않는다. 기본 형식은 `deploy/nginx/conf.d/upstream.conf.example`을 참고한다.
+
+기본 대기값은 환경변수로 조정할 수 있다.
+
+```bash
+DRAIN_SECONDS=15 HEALTH_RETRIES=40 ./scripts/deploy-blue-green.sh
 ```
 
 ## Logs
 
 ```bash
-docker compose -f docker-compose.prod.yml logs -f app
+docker compose -f docker-compose.prod.yml logs -f nginx
+docker compose -f docker-compose.prod.yml logs -f app-blue
+docker compose -f docker-compose.prod.yml logs -f app-green
 docker compose -f docker-compose.prod.yml logs -f discord-bot
+```
+
+## State Check
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+cat deploy/nginx/conf.d/upstream.conf
+curl http://localhost:8000/actuator/health
 ```
 
 ## S3
