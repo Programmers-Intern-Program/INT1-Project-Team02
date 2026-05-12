@@ -40,9 +40,20 @@ spring:
 internal:
   api-key: ${INTERNAL_API_KEY:}
 
+discord:
+  oauth:
+    client-id: ${DISCORD_CLIENT_ID}
+    client-secret: ${DISCORD_CLIENT_SECRET}
+    redirect-uri: ${DISCORD_REDIRECT_URI}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expire-hours: ${JWT_EXPIRE_HOURS:24}
+
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
 
 ai:
   provider: ${AI_PROVIDER:}

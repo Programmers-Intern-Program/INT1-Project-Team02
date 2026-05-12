@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -30,6 +31,7 @@ import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 
 @Testcontainers
+@ActiveProfiles("test")
 @SpringBootTest(
         properties = {
             "spring.flyway.enabled=false",
@@ -86,7 +88,7 @@ class ProjectControllerTest {
 
     @Test
     void connectChannel_채널을_프로젝트에_연결한다() throws Exception {
-        mockMvc.perform(put("/api/v1/projects/{id}/channel/{channelId}", project.getId(), "channel-123")
+        mockMvc.perform(put("/internal/v1/projects/{id}/channel/{channelId}", project.getId(), "channel-123")
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
@@ -100,7 +102,7 @@ class ProjectControllerTest {
         project.connectChannel("channel-123");
         projectRepository.save(project);
 
-        mockMvc.perform(delete("/api/v1/projects/{id}/channel", project.getId())
+        mockMvc.perform(delete("/internal/v1/projects/{id}/channel", project.getId())
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"));
@@ -114,7 +116,7 @@ class ProjectControllerTest {
         project.connectChannel("channel-123");
         projectRepository.save(project);
 
-        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "channel-123")
+        mockMvc.perform(get("/internal/v1/projects/channel/{channelId}", "channel-123")
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
@@ -123,7 +125,7 @@ class ProjectControllerTest {
 
     @Test
     void getByChannelId_연결된_프로젝트가_없으면_404를_반환한다() throws Exception {
-        mockMvc.perform(get("/api/v1/projects/channel/{channelId}", "없는채널")
+        mockMvc.perform(get("/internal/v1/projects/channel/{channelId}", "없는채널")
                         .header("X-Internal-Api-Key", "test-internal-key"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));

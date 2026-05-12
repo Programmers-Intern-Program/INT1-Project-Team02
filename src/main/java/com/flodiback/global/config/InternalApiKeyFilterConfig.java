@@ -20,7 +20,7 @@ public class InternalApiKeyFilterConfig {
         }
         FilterRegistrationBean<InternalApiKeyFilter> bean = new FilterRegistrationBean<>();
         bean.setFilter(new InternalApiKeyFilter(apiKey));
-        bean.addUrlPatterns("/api/*");
+        bean.addUrlPatterns("/internal/*");
         bean.setOrder(1);
         return bean;
     }

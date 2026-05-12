@@ -7,5 +7,7 @@ public record CreateProjectRequest(
         String description,
         String techStack,
         Long serverId,
+        String guildId,
+        String guildName,
         String channelId,
         String ownerDiscordId) {}
