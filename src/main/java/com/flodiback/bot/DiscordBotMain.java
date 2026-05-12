@@ -33,7 +33,6 @@ public final class DiscordBotMain {
         // 1) 토큰/설정값 로드
         String token = resolveToken();
         String prefix = BotEnv.getOrDefault("DISCORD_BOT_PREFIX", "!");
-        long defaultMeetingId = parseMeetingId(BotEnv.getOrDefault("DISCORD_DEFAULT_MEETING_ID", "1"));
 
         // 2) Opus native 로딩 상태 확인
         // canReceiveUser/Opus decode 경로는 native 준비 여부에 영향받는다.
@@ -66,16 +65,15 @@ public final class DiscordBotMain {
                 .disableCache(
                         CacheFlag.EMOJI, CacheFlag.STICKER, CacheFlag.SOUNDBOARD_SOUNDS, CacheFlag.SCHEDULED_EVENTS)
                 .setAudioModuleConfig(audioModuleConfig)
-                .addEventListeners(new DiscordCommandListener(prefix, sttProvider, defaultMeetingId, redisPublisher))
+                .addEventListeners(new DiscordCommandListener(prefix, sttProvider, redisPublisher))
                 .build()
                 .awaitReady();
 
         log.info(
-                "[봇/준비완료] userId={}, username={}, prefix={}, defaultMeetingId={}",
+                "[봇/준비완료] userId={}, username={}, prefix={}",
                 jda.getSelfUser().getId(),
                 jda.getSelfUser().getName(),
-                prefix,
-                defaultMeetingId);
+                prefix);
     }
 
     private static String resolveToken() {
@@ -84,17 +82,6 @@ public final class DiscordBotMain {
             throw new IllegalStateException("DISCORD_TOKEN 환경변수 또는 .env 값이 비어있습니다.");
         }
         return token;
-    }
-
-    /**
-     * 환경변수 문자열을 long meetingId로 안전하게 변환한다.
-     */
-    private static long parseMeetingId(String rawMeetingId) {
-        try {
-            return Long.parseLong(rawMeetingId.trim());
-        } catch (Exception exception) {
-            throw new IllegalStateException("DISCORD_DEFAULT_MEETING_ID 값이 숫자가 아닙니다: " + rawMeetingId, exception);
-        }
     }
 
     /**
