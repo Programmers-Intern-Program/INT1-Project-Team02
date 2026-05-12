@@ -83,7 +83,7 @@ wait_for_nginx_health() {
 
     log "nginx 경유 health check 대기 중"
     for _ in $(seq 1 "$HEALTH_RETRIES"); do
-        body="$("${COMPOSE[@]}" exec -T nginx wget -q -O - "http://localhost/actuator/health" 2>/dev/null || true)"
+        body="$("${COMPOSE[@]}" exec -T nginx wget -q -O - "http://127.0.0.1/actuator/health" 2>/dev/null || true)"
         if printf '%s' "$body" | grep -q '"status":"UP"'; then
             log "nginx 경유 health check 성공"
             return
