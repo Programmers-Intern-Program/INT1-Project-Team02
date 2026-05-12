@@ -64,7 +64,7 @@ public class AuthController {
 
         return ResponseEntity.status(302)
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .location(URI.create(frontendOrigin + "/dashboard"))
+                .location(URI.create(frontendOrigin + "/projects"))
                 .build();
     }
 

@@ -33,7 +33,14 @@ public class ProjectService {
         }
 
         DiscordServer server = null;
-        if (req.serverId() != null) {
+        if (req.guildId() != null) {
+            server = discordServerRepository
+                    .findByGuildId(req.guildId())
+                    .orElseGet(() -> discordServerRepository.save(DiscordServer.builder()
+                            .guildId(req.guildId())
+                            .guildName(req.guildName() != null ? req.guildName() : req.guildId())
+                            .build()));
+        } else if (req.serverId() != null) {
             server = discordServerRepository
                     .findById(req.serverId())
                     .orElseThrow(() -> new NoSuchElementException("존재하지 않는 서버입니다."));

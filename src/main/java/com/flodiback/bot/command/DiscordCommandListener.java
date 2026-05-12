@@ -620,7 +620,8 @@ public class DiscordCommandListener extends ListenerAdapter {
         body.put("name", name);
         putNullable(body, "description", modalValue(event, MODAL_PROJECT_DESCRIPTION));
         putNullable(body, "techStack", modalValue(event, MODAL_PROJECT_TECH_STACK));
-        body.putNull("serverId");
+        body.put("guildId", event.getGuild().getId());
+        body.put("guildName", event.getGuild().getName());
         body.put("channelId", event.getChannel().getId());
 
         return postData("/internal/v1/projects", body, "프로젝트 생성");
@@ -1392,7 +1393,8 @@ public class DiscordCommandListener extends ListenerAdapter {
             else body.putNull("description");
             if (techStack != null) body.put("techStack", techStack);
             else body.putNull("techStack");
-            body.putNull("serverId");
+            body.put("guildId", String.valueOf(guildId));
+            body.put("guildName", event.getGuild().getName());
             body.put("channelId", String.valueOf(channelId));
             body.put("ownerDiscordId", event.getAuthor().getId());
 
