@@ -1,8 +1,8 @@
 ---
 generated-by: ai-draft
-reviewed-by:
-reviewed-at:
-evidence:
+reviewed-by: madupal
+reviewed-at: 2026-05-12
+evidence: PR 81
 ---
 
 # WorkLog 담당자 Discord ID 저장
