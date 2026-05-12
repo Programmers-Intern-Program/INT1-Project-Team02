@@ -11,10 +11,18 @@ class DisabledAiChatServiceTest {
     private final AiChatService aiChatService = new DisabledAiChatService();
 
     @Test
-    void generateAnswer_throwsServiceException_whenAiChatIsDisabled() {
-        assertThatThrownBy(() -> aiChatService.generateAnswer("system prompt", "user question"))
+    void generateShortAnswer_throwsServiceException_whenAiChatIsDisabled() {
+        assertThatThrownBy(() -> aiChatService.generateShortAnswer("system prompt", "user question"))
                 .isInstanceOf(ServiceException.class)
                 .hasMessageContaining("503-1")
-                .hasMessageContaining("GLM 채팅 서비스가 비활성화되어 있습니다.");
+                .hasMessageContaining("AI chat service is disabled.");
+    }
+
+    @Test
+    void generateSummary_throwsServiceException_whenAiChatIsDisabled() {
+        assertThatThrownBy(() -> aiChatService.generateSummary("system prompt", "user question"))
+                .isInstanceOf(ServiceException.class)
+                .hasMessageContaining("503-1")
+                .hasMessageContaining("AI chat service is disabled.");
     }
 }

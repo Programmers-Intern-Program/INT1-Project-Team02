@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,9 +49,10 @@ public class ContextService {
 
     private static final double SEMANTIC_WEIGHT = 0.7;
     private static final double KEYWORD_WEIGHT = 0.3;
-    private static final int TOP_K = 3;
-    private static final int UNCOMPRESSED_TOKEN_BUDGET = 1200;
-    private static final int MIN_RECENT_UTTERANCE_COUNT = 10;
+    private static final int TOP_K = 5;
+    private static final int RECENT_DB_LIMIT = 60;
+    private static final int UNCOMPRESSED_TOKEN_BUDGET = 2200;
+    private static final int MIN_RECENT_UTTERANCE_COUNT = 16;
 
     private final MeetingRepository meetingRepository;
     private final UtteranceRepository utteranceRepository;
@@ -89,14 +91,15 @@ public class ContextService {
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
         if (latestCache == null) {
-            List<Utterance> fetched = utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting);
+            List<Utterance> fetched =
+                    utteranceRepository.findByMeetingOrderByIdDesc(meeting, PageRequest.of(0, RECENT_DB_LIMIT));
             List<Utterance> recentUtterances = selectRecentUtterances(fetched);
             logShortTerm(meeting.getId(), startedAtNanos, false, fetched.size(), recentUtterances.size());
             return new ShortTermParts(null, recentUtterances);
         }
 
-        List<Utterance> fetched = utteranceRepository.findTop30ByMeetingAndIdGreaterThanOrderByIdDesc(
-                meeting, latestCache.getCompressedUntilUtteranceId());
+        List<Utterance> fetched = utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdDesc(
+                meeting, latestCache.getCompressedUntilUtteranceId(), PageRequest.of(0, RECENT_DB_LIMIT));
         List<Utterance> recentUtterances = selectRecentUtterances(fetched);
         logShortTerm(meeting.getId(), startedAtNanos, true, fetched.size(), recentUtterances.size());
         return new ShortTermParts(latestCache.getCompressedText(), recentUtterances);
@@ -188,6 +191,7 @@ public class ContextService {
                             .meeting(meeting)
                             .project(project)
                             .assigneeName(item.assigneeName())
+                            .assigneeDiscordId(item.assigneeDiscordId())
                             .task(item.task())
                             .dueDate(item.dueDate())
                             .build()));

@@ -24,12 +24,12 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class SpeechAiAnswerService {
 
-    private static final int ROLLING_SUMMARY_MAX_CHARS = 800;
-    private static final int UNRESOLVED_ITEMS_MAX_CHARS = 400;
-    private static final int PROJECT_METADATA_MAX_CHARS = 300;
-    private static final int DECISION_CONTENT_MAX_CHARS = 250;
-    private static final int PAST_SUMMARY_MAX_CHARS = 400;
-    private static final int WORK_LOG_TASK_MAX_CHARS = 160;
+    private static final int ROLLING_SUMMARY_MAX_CHARS = 1400;
+    private static final int UNRESOLVED_ITEMS_MAX_CHARS = 700;
+    private static final int PROJECT_METADATA_MAX_CHARS = 600;
+    private static final int DECISION_CONTENT_MAX_CHARS = 500;
+    private static final int PAST_SUMMARY_MAX_CHARS = 800;
+    private static final int WORK_LOG_TASK_MAX_CHARS = 240;
 
     private static final String SYSTEM_PROMPT = """
             너는 Discord 회의에 참여하는 AI 회의 보조자야.
@@ -46,7 +46,7 @@ public class SpeechAiAnswerService {
         long totalStartedAtNanos = System.nanoTime();
         long contextElapsedMs = -1L;
         long promptElapsedMs = -1L;
-        long glmElapsedMs = -1L;
+        long chatElapsedMs = -1L;
         int promptChars = -1;
         int recentUtteranceCount = -1;
         int questionDecisionCount = -1;
@@ -73,7 +73,7 @@ public class SpeechAiAnswerService {
             questionSummaryCount = context.questionContext().pastSummaries().size();
 
             log.info(
-                    "AI answer GLM call started. meetingId={}, promptChars={}, systemPromptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
+                    "AI answer chat call started. meetingId={}, promptChars={}, systemPromptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
                     meetingId,
                     promptChars,
                     SYSTEM_PROMPT.length(),
@@ -81,22 +81,22 @@ public class SpeechAiAnswerService {
                     questionDecisionCount,
                     questionSummaryCount);
 
-            long glmStartedAtNanos = System.nanoTime();
+            long chatStartedAtNanos = System.nanoTime();
             String answer;
             try {
-                answer = aiChatService.generateAnswer(SYSTEM_PROMPT, userPrompt);
+                answer = aiChatService.generateShortAnswer(SYSTEM_PROMPT, userPrompt);
             } finally {
-                glmElapsedMs = elapsedMillis(glmStartedAtNanos);
+                chatElapsedMs = elapsedMillis(chatStartedAtNanos);
             }
             long totalElapsedMs = elapsedMillis(totalStartedAtNanos);
 
             log.info(
-                    "AI answer generated. meetingId={}, totalMs={}, contextMs={}, promptMs={}, glmMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
+                    "AI answer generated. meetingId={}, totalMs={}, contextMs={}, promptMs={}, chatMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}",
                     meetingId,
                     totalElapsedMs,
                     contextElapsedMs,
                     promptElapsedMs,
-                    glmElapsedMs,
+                    chatElapsedMs,
                     promptChars,
                     recentUtteranceCount,
                     questionDecisionCount,
@@ -105,12 +105,12 @@ public class SpeechAiAnswerService {
             return StringUtils.hasText(answer) ? answer.strip() : null;
         } catch (RuntimeException e) {
             log.warn(
-                    "AI answer generation failed. meetingId={}, totalMs={}, contextMs={}, promptMs={}, glmMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}, exceptionType={}, reason={}",
+                    "AI answer generation failed. meetingId={}, totalMs={}, contextMs={}, promptMs={}, chatMs={}, promptChars={}, recentUtterances={}, questionDecisions={}, questionSummaries={}, exceptionType={}, reason={}",
                     meetingId,
                     elapsedMillis(totalStartedAtNanos),
                     contextElapsedMs,
                     promptElapsedMs,
-                    glmElapsedMs,
+                    chatElapsedMs,
                     promptChars,
                     recentUtteranceCount,
                     questionDecisionCount,

@@ -1,3 +1,5 @@
+import org.gradle.kotlin.dsl.implementation
+
 plugins {
     java
     id("org.springframework.boot") version "3.5.14"
@@ -67,7 +69,7 @@ spotless {
 }
 
 group = "com"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.0"
 description = "flodi-back"
 
 java {
@@ -83,6 +85,8 @@ repositories {
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    // EC2 배포 후 /actuator/health로 컨테이너 상태를 확인한다.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("io.jsonwebtoken:jjwt-api:0.12.6")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")

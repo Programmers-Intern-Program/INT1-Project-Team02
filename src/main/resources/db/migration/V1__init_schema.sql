@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS work_logs (
     meeting_id    BIGINT       NOT NULL REFERENCES meetings (id),
     project_id    BIGINT       NOT NULL REFERENCES projects (id),
     assignee_name VARCHAR(100) NOT NULL,
+    assignee_discord_id VARCHAR(50),
     task          TEXT         NOT NULL,
     due_date      DATE,
     status        VARCHAR(20)  NOT NULL DEFAULT 'TODO',

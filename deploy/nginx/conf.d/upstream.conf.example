@@ -1,0 +1,3 @@
+upstream flodi_backend {
+    server app-blue:8080;
+}

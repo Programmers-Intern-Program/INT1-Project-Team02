@@ -22,12 +22,22 @@ class GlmAiChatServiceTest {
     private GlmAiChatService glmAiChatService;
 
     @Test
-    void generateAnswer_delegatesToGlmClient() {
+    void generateShortAnswer_delegatesToGlmClient() {
         given(glmClient.chat("system", "user")).willReturn("answer");
 
-        String result = glmAiChatService.generateAnswer("system", "user");
+        String result = glmAiChatService.generateShortAnswer("system", "user");
 
         assertThat(result).isEqualTo("answer");
+        verify(glmClient).chat("system", "user");
+    }
+
+    @Test
+    void generateSummary_delegatesToGlmClient() {
+        given(glmClient.chat("system", "user")).willReturn("summary");
+
+        String result = glmAiChatService.generateSummary("system", "user");
+
+        assertThat(result).isEqualTo("summary");
         verify(glmClient).chat("system", "user");
     }
 }
