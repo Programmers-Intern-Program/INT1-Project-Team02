@@ -95,6 +95,7 @@ Query:
       {
         "id": 7,
         "assigneeName": "김철수",
+        "assigneeDiscordId": "123456789",
         "task": "로그인 API 작성",
         "dueDate": "2026-05-10",
         "status": "TODO"

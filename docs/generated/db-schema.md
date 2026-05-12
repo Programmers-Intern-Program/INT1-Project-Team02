@@ -83,6 +83,7 @@
 - `meeting_id` BIGINT FK -> `meetings.id` NOT NULL
 - `project_id` BIGINT FK -> `projects.id` NOT NULL
 - `assignee_name` VARCHAR(100) NOT NULL
+- `assignee_discord_id` VARCHAR(50) NULL
 - `task` TEXT NOT NULL
 - `due_date` DATE NULL
 - `created_at` TIMESTAMP NOT NULL
