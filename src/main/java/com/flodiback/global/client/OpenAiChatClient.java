@@ -72,11 +72,22 @@ public class OpenAiChatClient {
     }
 
     public String chat(String systemPrompt, String userPrompt) {
-        ChatCompletionCreateParams params = ChatCompletionCreateParams.builder()
+        return chat(systemPrompt, userPrompt, null);
+    }
+
+    public String chat(String systemPrompt, String userPrompt, int maxCompletionTokens) {
+        return chat(systemPrompt, userPrompt, Long.valueOf(maxCompletionTokens));
+    }
+
+    private String chat(String systemPrompt, String userPrompt, Long maxCompletionTokens) {
+        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .addSystemMessage(systemPrompt)
                 .addUserMessage(userPrompt)
-                .model(model)
-                .build();
+                .model(model);
+        if (maxCompletionTokens != null) {
+            builder.maxCompletionTokens(maxCompletionTokens);
+        }
+        ChatCompletionCreateParams params = builder.build();
 
         long startedAtNanos = System.nanoTime();
         try {
@@ -91,10 +102,11 @@ public class OpenAiChatClient {
             String content = firstChoice.message().content().orElse("");
             long latencyMs = elapsedMillis(startedAtNanos);
             log.info(
-                    "OpenAI chat call succeeded. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, choiceCount={}, finishReason={}, responseChars={}",
+                    "OpenAI chat call succeeded. model={}, timeoutMs={}, maxRetries={}, maxCompletionTokens={}, latencyMs={}, choiceCount={}, finishReason={}, responseChars={}",
                     model,
                     timeoutMs,
                     maxRetries,
+                    maxCompletionTokens,
                     latencyMs,
                     choiceCount,
                     firstChoice.finishReason(),
@@ -107,10 +119,11 @@ public class OpenAiChatClient {
 
             if (e instanceof OpenAIServiceException serviceException) {
                 log.warn(
-                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}, statusCode={}, errorType={}, errorCode={}, errorParam={}, errorBodyPreview={}",
+                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, maxCompletionTokens={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}, statusCode={}, errorType={}, errorCode={}, errorParam={}, errorBodyPreview={}",
                         model,
                         timeoutMs,
                         maxRetries,
+                        maxCompletionTokens,
                         latencyMs,
                         e.getClass().getSimpleName(),
                         e.getMessage(),
@@ -123,10 +136,11 @@ public class OpenAiChatClient {
                         preview(serviceException.body().toString(), 500));
             } else {
                 log.warn(
-                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}",
+                        "OpenAI chat call failed. model={}, timeoutMs={}, maxRetries={}, maxCompletionTokens={}, latencyMs={}, exceptionType={}, message={}, rootCauseType={}, rootCauseMessage={}",
                         model,
                         timeoutMs,
                         maxRetries,
+                        maxCompletionTokens,
                         latencyMs,
                         e.getClass().getSimpleName(),
                         e.getMessage(),

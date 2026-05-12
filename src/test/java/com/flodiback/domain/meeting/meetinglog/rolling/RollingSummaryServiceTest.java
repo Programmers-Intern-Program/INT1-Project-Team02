@@ -61,7 +61,7 @@ class RollingSummaryServiceTest {
         service.compressIfNeeded(1L);
 
         verify(aiChatService, never())
-                .generateAnswer(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                .generateSummary(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -69,7 +69,7 @@ class RollingSummaryServiceTest {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         RollingSummaryPersistenceService.CompressionCandidate candidate = candidate();
         given(rollingSummaryPersistenceService.prepareCompression(1L)).willReturn(Optional.of(candidate));
-        given(aiChatService.generateAnswer(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        given(aiChatService.generateSummary(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .willReturn(" ");
 
         service.compressIfNeeded(1L);
@@ -83,7 +83,7 @@ class RollingSummaryServiceTest {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         RollingSummaryPersistenceService.CompressionCandidate candidate = candidate();
         given(rollingSummaryPersistenceService.prepareCompression(1L)).willReturn(Optional.of(candidate));
-        given(aiChatService.generateAnswer(
+        given(aiChatService.generateSummary(
                         org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("prompt")))
                 .willReturn("summary");
 
@@ -97,7 +97,7 @@ class RollingSummaryServiceTest {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         RollingSummaryPersistenceService.CompressionCandidate candidate = candidate();
         given(rollingSummaryPersistenceService.prepareCompression(1L)).willReturn(Optional.of(candidate));
-        given(aiChatService.generateAnswer(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        given(aiChatService.generateSummary(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .willThrow(new RuntimeException("glm failed"));
 
         assertThatCode(() -> service.compressIfNeeded(1L)).doesNotThrowAnyException();

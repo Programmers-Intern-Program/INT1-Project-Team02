@@ -16,8 +16,12 @@ public class GlmAiChatService implements AiChatService {
     private final GlmClient glmClient;
 
     @Override
-    public String generateAnswer(String systemPrompt, String userQuestion) {
-        // 실제 GLM 호출은 공용 GlmClient에 위임해 호출부가 SDK 세부 구현을 몰라도 되게 합니다.
+    public String generateShortAnswer(String systemPrompt, String userQuestion) {
+        return glmClient.chat(systemPrompt, userQuestion);
+    }
+
+    @Override
+    public String generateSummary(String systemPrompt, String userQuestion) {
         return glmClient.chat(systemPrompt, userQuestion);
     }
 }

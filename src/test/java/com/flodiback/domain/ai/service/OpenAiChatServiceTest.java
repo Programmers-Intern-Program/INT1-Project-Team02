@@ -22,12 +22,22 @@ class OpenAiChatServiceTest {
     private OpenAiChatService openAiChatService;
 
     @Test
-    void generateAnswer_delegatesToOpenAiChatClient() {
-        given(openAiChatClient.chat("system", "user")).willReturn("answer");
+    void generateShortAnswer_delegatesToOpenAiChatClientWithTokenCap() {
+        given(openAiChatClient.chat("system", "user", 256)).willReturn("answer");
 
-        String result = openAiChatService.generateAnswer("system", "user");
+        String result = openAiChatService.generateShortAnswer("system", "user");
 
         assertThat(result).isEqualTo("answer");
+        verify(openAiChatClient).chat("system", "user", 256);
+    }
+
+    @Test
+    void generateSummary_delegatesToOpenAiChatClientWithoutTokenCap() {
+        given(openAiChatClient.chat("system", "user")).willReturn("summary");
+
+        String result = openAiChatService.generateSummary("system", "user");
+
+        assertThat(result).isEqualTo("summary");
         verify(openAiChatClient).chat("system", "user");
     }
 }

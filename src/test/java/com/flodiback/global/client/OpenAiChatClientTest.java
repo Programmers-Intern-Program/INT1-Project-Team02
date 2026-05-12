@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +15,7 @@ import com.openai.errors.OpenAIIoException;
 import com.openai.errors.UnexpectedStatusCodeException;
 import com.openai.models.ErrorObject;
 import com.openai.models.chat.completions.ChatCompletion;
+import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessage;
 
 class OpenAiChatClientTest {
@@ -25,6 +27,34 @@ class OpenAiChatClientTest {
         String result = openAiChatClient.chat("system", "user");
 
         assertThat(result).isEqualTo("answer");
+    }
+
+    @Test
+    void chat_setsMaxCompletionTokens_whenProvided() {
+        AtomicReference<ChatCompletionCreateParams> capturedParams = new AtomicReference<>();
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", params -> {
+            capturedParams.set(params);
+            return completion("answer");
+        });
+
+        String result = openAiChatClient.chat("system", "user", 256);
+
+        assertThat(result).isEqualTo("answer");
+        assertThat(capturedParams.get().maxCompletionTokens()).contains(256L);
+    }
+
+    @Test
+    void chat_doesNotSetMaxCompletionTokens_whenNotProvided() {
+        AtomicReference<ChatCompletionCreateParams> capturedParams = new AtomicReference<>();
+        OpenAiChatClient openAiChatClient = new OpenAiChatClient("openai-test", params -> {
+            capturedParams.set(params);
+            return completion("answer");
+        });
+
+        String result = openAiChatClient.chat("system", "user");
+
+        assertThat(result).isEqualTo("answer");
+        assertThat(capturedParams.get().maxCompletionTokens()).isEmpty();
     }
 
     @Test
