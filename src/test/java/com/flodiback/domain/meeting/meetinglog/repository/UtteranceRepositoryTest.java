@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.data.domain.PageRequest;
 
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
@@ -58,6 +59,19 @@ class UtteranceRepositoryTest extends AbstractPostgresIntegrationTest {
         List<Utterance> result = utteranceRepository.findTop20ByMeetingIdOrderBySpeechStartedAtDesc(meeting.getId());
 
         assertThat(result).hasSize(20);
+    }
+
+    @Test
+    void findByMeetingOrderByIdDesc_usesPageableLimit() {
+        for (int i = 0; i < 65; i++) {
+            em.persist(utterance(meeting, "user" + i, "discord" + i, "content " + i));
+        }
+        em.flush();
+
+        List<Utterance> result = utteranceRepository.findByMeetingOrderByIdDesc(meeting, PageRequest.of(0, 60));
+
+        assertThat(result).hasSize(60);
+        assertThat(result.get(0).getId()).isGreaterThan(result.get(59).getId());
     }
 
     private Utterance utterance(Meeting m, String name, String discordId, String content) {

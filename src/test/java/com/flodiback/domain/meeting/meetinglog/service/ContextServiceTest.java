@@ -110,7 +110,8 @@ class ContextServiceTest {
         Meeting meeting = Meeting.builder().title("standalone").build();
         ReflectionTestUtils.setField(meeting, "id", 1L);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);
 
@@ -124,20 +125,22 @@ class ContextServiceTest {
     void assemble_noCache_usesTokenBudgetButKeepsAtLeastTenUtterances() {
         Meeting meeting = Meeting.builder().title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(utterances(meeting, 1, 30, 100));
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(utterances(meeting, 1, 30, 100));
 
         ContextResponse result = contextService.assemble(1L, null);
 
-        assertThat(result.shortTerm().recentUtterances()).hasSize(12);
-        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-19");
-        assertThat(result.shortTerm().recentUtterances().get(11).content()).isEqualTo("content-30");
+        assertThat(result.shortTerm().recentUtterances()).hasSize(22);
+        assertThat(result.shortTerm().recentUtterances().get(0).content()).isEqualTo("content-9");
+        assertThat(result.shortTerm().recentUtterances().get(21).content()).isEqualTo("content-30");
     }
 
     @Test
     void assemble_noCache_returnsMoreThanTwenty_whenTokensFitBudget() {
         Meeting meeting = Meeting.builder().title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(utterances(meeting, 1, 30, 10));
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(utterances(meeting, 1, 30, 10));
 
         ContextResponse result = contextService.assemble(1L, null);
 
@@ -157,7 +160,8 @@ class ContextServiceTest {
                 .build();
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.of(cache));
-        given(utteranceRepository.findTop30ByMeetingAndIdGreaterThanOrderByIdDesc(meeting, 10L))
+        given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdDesc(
+                        org.mockito.ArgumentMatchers.eq(meeting), org.mockito.ArgumentMatchers.eq(10L), any()))
                 .willReturn(utterances(meeting, 11, 31, 10));
 
         ContextResponse result = contextService.assemble(1L, null);
@@ -174,7 +178,8 @@ class ContextServiceTest {
         MeetingStartContext startContext = startContext(1L, 10L);
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext);
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(Collections.emptyList());
 
         ContextResponse result = contextService.assemble(1L, null);
 
@@ -205,13 +210,14 @@ class ContextServiceTest {
         MeetingSummary newSummary = meetingSummary(meeting, 12L, "new related summary");
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext);
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(Collections.emptyList());
         given(embeddingClient.embed("what did we decide?")).willReturn(new float[] {0.1f, 0.2f});
         given(decisionRepository.hybridSearch(
                         org.mockito.ArgumentMatchers.eq(10L),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.eq("what did we decide?"),
-                        org.mockito.ArgumentMatchers.eq(3),
+                        org.mockito.ArgumentMatchers.eq(5),
                         org.mockito.ArgumentMatchers.eq(0.7),
                         org.mockito.ArgumentMatchers.eq(0.3)))
                 .willReturn(List.of(duplicateDecision, newDecision));
@@ -220,7 +226,7 @@ class ContextServiceTest {
                         org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.eq("what did we decide?"),
-                        org.mockito.ArgumentMatchers.eq(3),
+                        org.mockito.ArgumentMatchers.eq(5),
                         org.mockito.ArgumentMatchers.eq(0.7),
                         org.mockito.ArgumentMatchers.eq(0.3)))
                 .willReturn(List.of(duplicateSummary, newSummary));
@@ -242,7 +248,8 @@ class ContextServiceTest {
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingStartContextProvider.getOrCreate(1L)).willReturn(startContext(1L, 10L));
-        given(utteranceRepository.findTop30ByMeetingOrderByIdDesc(meeting)).willReturn(Collections.emptyList());
+        given(utteranceRepository.findByMeetingOrderByIdDesc(org.mockito.ArgumentMatchers.eq(meeting), any()))
+                .willReturn(Collections.emptyList());
         given(embeddingClient.embed("find summary")).willThrow(new RuntimeException("embedding failed"));
 
         ContextResponse result = contextService.assemble(1L, "find summary");

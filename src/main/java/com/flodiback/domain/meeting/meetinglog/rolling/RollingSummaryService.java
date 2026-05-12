@@ -13,8 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RollingSummaryService {
 
-    static final int TOKEN_THRESHOLD = 1800;
-    static final int KEEP_TURNS = 12;
+    static final int TOKEN_THRESHOLD = 2600;
+    static final int KEEP_TURNS = 18;
 
     private static final String SYSTEM_PROMPT = """
             당신은 회의 내용을 압축하는 AI 요약기입니다.
@@ -43,7 +43,7 @@ public class RollingSummaryService {
     public void compressIfNeeded(Long meetingId) {
         try {
             rollingSummaryPersistenceService.prepareCompression(meetingId).ifPresent(candidate -> {
-                String compressedText = aiChatService.generateAnswer(SYSTEM_PROMPT, candidate.userPrompt());
+                String compressedText = aiChatService.generateSummary(SYSTEM_PROMPT, candidate.userPrompt());
                 if (!StringUtils.hasText(compressedText)) {
                     log.warn("Rolling summary GLM returned blank result. meetingId={}", meetingId);
                     return;

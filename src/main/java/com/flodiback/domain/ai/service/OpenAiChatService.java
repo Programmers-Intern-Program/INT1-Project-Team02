@@ -13,10 +13,17 @@ import lombok.RequiredArgsConstructor;
 @Conditional(OpenAiProviderCondition.class)
 public class OpenAiChatService implements AiChatService {
 
+    private static final int SHORT_ANSWER_MAX_COMPLETION_TOKENS = 256;
+
     private final OpenAiChatClient openAiChatClient;
 
     @Override
-    public String generateAnswer(String systemPrompt, String userQuestion) {
+    public String generateShortAnswer(String systemPrompt, String userQuestion) {
+        return openAiChatClient.chat(systemPrompt, userQuestion, SHORT_ANSWER_MAX_COMPLETION_TOKENS);
+    }
+
+    @Override
+    public String generateSummary(String systemPrompt, String userQuestion) {
         return openAiChatClient.chat(systemPrompt, userQuestion);
     }
 }

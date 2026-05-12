@@ -40,7 +40,7 @@ class SpeechAiAnswerServiceTest {
 
     @Test
     void extractQuestion_returnsNull_whenWakeWordDoesNotExist() {
-        String result = speechAiAnswerService.extractQuestion("이번 스프린트 목표를 정해봅시다.");
+        String result = speechAiAnswerService.extractQuestion("이번 스프린트 목표를 정해봅시다");
 
         assertThat(result).isNull();
     }
@@ -54,11 +54,11 @@ class SpeechAiAnswerServiceTest {
 
     @Test
     void extractQuestion_doesNotCallDependencies_whenWakeWordDoesNotExist() {
-        String result = speechAiAnswerService.extractQuestion("이번 스프린트 목표를 정해봅시다.");
+        String result = speechAiAnswerService.extractQuestion("이번 스프린트 목표를 정해봅시다");
 
         assertThat(result).isNull();
-        verify(contextService, never()).assemble(1L, "이번 스프린트 목표를 정해봅시다.");
-        verify(aiChatService, never()).generateAnswer(anyString(), anyString());
+        verify(contextService, never()).assemble(1L, "이번 스프린트 목표를 정해봅시다");
+        verify(aiChatService, never()).generateShortAnswer(anyString(), anyString());
     }
 
     @Test
@@ -70,47 +70,39 @@ class SpeechAiAnswerServiceTest {
                         "Flodi",
                         "Spring Boot",
                         "metadata",
-                        List.of(new DecisionSummary(1L, "인증 방식은 JWT로 한다.", null)),
-                        List.of(new PastSummary(1L, "로그인 기능 담당자를 정했다.", null)),
-                        "API 응답 형식 미정",
-                        List.of(new WorkLogSummary(1L, "김철수", "로그인 API 작성", null, "TODO"))),
-                new ShortTermContext(null, List.of(new UtteranceSummary("김철수", "인증은 JWT로 하자.", null))),
+                        List.of(new DecisionSummary(1L, "auth uses JWT", null)),
+                        List.of(new PastSummary(1L, "assigned login feature", null)),
+                        "API response format undecided",
+                        List.of(new WorkLogSummary(1L, "Alice", "write login API", null, "TODO"))),
+                new ShortTermContext(null, List.of(new UtteranceSummary("Alice", "Let's use JWT.", null))),
                 QuestionContext.empty());
 
-        given(contextService.assemble(1L, "인증 방식 뭐로 하기로 했어?")).willReturn(context);
-        given(aiChatService.generateAnswer(anyString(), anyString())).willReturn("[회의 기반] 인증 방식은 JWT로 결정했습니다.");
+        given(contextService.assemble(1L, "what auth did we choose?")).willReturn(context);
+        given(aiChatService.generateShortAnswer(anyString(), anyString())).willReturn("[meeting] auth uses JWT.");
 
-        String result = speechAiAnswerService.generateAnswer(1L, "인증 방식 뭐로 하기로 했어?");
+        String result = speechAiAnswerService.generateAnswer(1L, "what auth did we choose?");
 
-        assertThat(result).isEqualTo("[회의 기반] 인증 방식은 JWT로 결정했습니다.");
-        verify(contextService).assemble(1L, "인증 방식 뭐로 하기로 했어?");
+        assertThat(result).isEqualTo("[meeting] auth uses JWT.");
+        verify(contextService).assemble(1L, "what auth did we choose?");
 
         ArgumentCaptor<String> systemPromptCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(aiChatService).generateAnswer(systemPromptCaptor.capture(), userPromptCaptor.capture());
-        assertThat(systemPromptCaptor.getValue())
-                .contains("[회의 기반]")
-                .contains("[일반 지식 기반]")
-                .contains("2~3문장");
+        verify(aiChatService).generateShortAnswer(systemPromptCaptor.capture(), userPromptCaptor.capture());
+        assertThat(systemPromptCaptor.getValue()).contains("2~3");
         assertThat(userPromptCaptor.getValue())
-                .contains("[답변 규칙]")
-                .contains("[회의 시작 컨텍스트]")
-                .contains("[현재 회의 컨텍스트]")
-                .contains("[질문 관련 추가 기억]")
-                .contains("[질문]")
                 .contains("Flodi")
-                .contains("인증 방식은 JWT로 한다.")
-                .contains("로그인 기능 담당자를 정했다.")
-                .contains("API 응답 형식 미정")
-                .contains("로그인 API 작성")
-                .contains("인증 방식 뭐로 하기로 했어?");
+                .contains("auth uses JWT")
+                .contains("assigned login feature")
+                .contains("API response format undecided")
+                .contains("write login API")
+                .contains("what auth did we choose?");
     }
 
     @Test
     void generateAnswer_truncatesLongContextText() {
-        String longMetadata = "m".repeat(350);
-        String longDecision = "d".repeat(300);
-        String longSummary = "s".repeat(450);
+        String longMetadata = "m".repeat(650);
+        String longDecision = "d".repeat(550);
+        String longSummary = "s".repeat(850);
         ContextResponse context = new ContextResponse(
                 new MeetingStartContext(
                         1L,
@@ -120,33 +112,33 @@ class SpeechAiAnswerServiceTest {
                         longMetadata,
                         List.of(new DecisionSummary(1L, longDecision, null)),
                         List.of(new PastSummary(1L, longSummary, null)),
-                        "u".repeat(450),
-                        List.of(new WorkLogSummary(1L, "김철수", "w".repeat(200), null, "TODO"))),
-                new ShortTermContext("r".repeat(900), List.of()),
+                        "u".repeat(750),
+                        List.of(new WorkLogSummary(1L, "Alice", "w".repeat(260), null, "TODO"))),
+                new ShortTermContext("r".repeat(1500), List.of()),
                 QuestionContext.empty());
-        given(contextService.assemble(1L, "요약해줘")).willReturn(context);
-        given(aiChatService.generateAnswer(anyString(), anyString())).willReturn("done");
+        given(contextService.assemble(1L, "summarize")).willReturn(context);
+        given(aiChatService.generateShortAnswer(anyString(), anyString())).willReturn("done");
 
-        speechAiAnswerService.generateAnswer(1L, "요약해줘");
+        speechAiAnswerService.generateAnswer(1L, "summarize");
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(aiChatService).generateAnswer(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateShortAnswer(anyString(), userPromptCaptor.capture());
         String prompt = userPromptCaptor.getValue();
-        assertThat(prompt).contains("m".repeat(300) + "...");
-        assertThat(prompt).contains("d".repeat(250) + "...");
-        assertThat(prompt).contains("s".repeat(400) + "...");
-        assertThat(prompt).contains("u".repeat(400) + "...");
-        assertThat(prompt).contains("w".repeat(160) + "...");
-        assertThat(prompt).contains("r".repeat(800) + "...");
+        assertThat(prompt).contains("m".repeat(600) + "...");
+        assertThat(prompt).contains("d".repeat(500) + "...");
+        assertThat(prompt).contains("s".repeat(800) + "...");
+        assertThat(prompt).contains("u".repeat(700) + "...");
+        assertThat(prompt).contains("w".repeat(240) + "...");
+        assertThat(prompt).contains("r".repeat(1400) + "...");
     }
 
     @Test
     void extractQuestion_acceptsMisrecognizedFlodiWakeWord() {
-        String result = speechAiAnswerService.extractQuestion("플로디아 아까 말랑이 관련 이야기 요약 좀 해줄래?");
+        String result = speechAiAnswerService.extractQuestion("플로디아 아까 말한 내용 요약해줘");
 
-        assertThat(result).isEqualTo("아까 말랑이 관련 이야기 요약 좀 해줄래?");
-        verify(contextService, never()).assemble(1L, "아까 말랑이 관련 이야기 요약 좀 해줄래?");
-        verify(aiChatService, never()).generateAnswer(anyString(), anyString());
+        assertThat(result).isEqualTo("아까 말한 내용 요약해줘");
+        verify(contextService, never()).assemble(1L, "아까 말한 내용 요약해줘");
+        verify(aiChatService, never()).generateShortAnswer(anyString(), anyString());
     }
 
     @Test
@@ -155,19 +147,19 @@ class SpeechAiAnswerServiceTest {
 
         assertThat(result).isNull();
         verify(contextService, never()).assemble(1L, "");
-        verify(aiChatService, never()).generateAnswer(anyString(), anyString());
+        verify(aiChatService, never()).generateShortAnswer(anyString(), anyString());
     }
 
     @Test
     void generateAnswer_returnsNull_whenAiChatFails() {
         ContextResponse context = ContextResponse.noProject(null, List.of());
-        given(contextService.assemble(1L, "토큰 만료 시간 정했어?")).willReturn(context);
-        given(aiChatService.generateAnswer(anyString(), anyString())).willThrow(new RuntimeException("GLM error"));
+        given(contextService.assemble(1L, "token expiry?")).willReturn(context);
+        given(aiChatService.generateShortAnswer(anyString(), anyString())).willThrow(new RuntimeException("AI error"));
 
-        String result = speechAiAnswerService.generateAnswer(1L, "토큰 만료 시간 정했어?");
+        String result = speechAiAnswerService.generateAnswer(1L, "token expiry?");
 
         assertThat(result).isNull();
-        verify(contextService).assemble(1L, "토큰 만료 시간 정했어?");
-        verify(aiChatService).generateAnswer(anyString(), anyString());
+        verify(contextService).assemble(1L, "token expiry?");
+        verify(aiChatService).generateShortAnswer(anyString(), anyString());
     }
 }
