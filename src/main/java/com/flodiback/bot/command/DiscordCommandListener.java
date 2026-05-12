@@ -144,15 +144,10 @@ public class DiscordCommandListener extends ListenerAdapter {
     private final RedisPublisher redisPublisher;
 
     public DiscordCommandListener() {
-        this("!", new OpenAiSttProvider(), 1L, null);
+        this("!", new OpenAiSttProvider(), null);
     }
 
-    public DiscordCommandListener(String prefix, SttProvider sttProvider, long defaultMeetingId) {
-        this(prefix, sttProvider, defaultMeetingId, null);
-    }
-
-    public DiscordCommandListener(
-            String prefix, SttProvider sttProvider, long defaultMeetingId, RedisPublisher redisPublisher) {
+    public DiscordCommandListener(String prefix, SttProvider sttProvider, RedisPublisher redisPublisher) {
         this.prefix = (prefix == null || prefix.isBlank()) ? "!" : prefix.trim();
         this.sttProvider = Objects.requireNonNull(sttProvider);
         this.internalBaseUrl = normalizeBaseUrl(BotEnv.getOrDefault("INTERNAL_API_BASE_URL", "http://localhost:8080"));
