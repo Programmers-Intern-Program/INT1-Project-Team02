@@ -8,10 +8,11 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  update-code:
+    name: 코드 업데이트
     runs-on: ubuntu-latest
     steps:
-      - name: EC2 SSH 배포
+      - name: EC2 git pull
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -22,17 +23,38 @@ jobs:
             git fetch origin
             git checkout main
             git pull origin main
+
+  deploy:
+    name: 무중단 배포
+    runs-on: ubuntu-latest
+    needs: update-code
+    steps:
+      - name: deploy-blue-green.sh 실행
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            cd ~/INT1-Project-Team02
             ./scripts/deploy-blue-green.sh
 
-      - name: Discord 알림 (배포 성공)
-        if: success()
+  notify:
+    name: Discord 알림
+    runs-on: ubuntu-latest
+    needs: [ update-code, deploy ]
+    if: always()
+    steps:
+      - name: 배포 성공
+        if: ${{ needs.deploy.result == 'success' }}
         run: |
           curl -s -H "Content-Type: application/json" \
             -d "{\"embeds\":[{\"title\":\"배포 완료 🚀\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":3066993}]}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-      - name: Discord 알림 (배포 실패)
-        if: failure()
+      - name: 배포 실패
+        if: ${{ needs.update-code.result == 'failure' || needs.deploy.result == 'failure' }}
         run: |
           curl -s -H "Content-Type: application/json" \
             -d "{\"embeds\":[{\"title\":\"배포 실패 ❌\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":15158332}]}" \
