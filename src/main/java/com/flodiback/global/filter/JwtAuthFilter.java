@@ -50,8 +50,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
         try {
             Claims claims = jwtProvider.parse(jwt);
+            List<String> guildIds = jwtProvider.extractGuildIds(claims);
             var auth = new UsernamePasswordAuthenticationToken(
                     claims.getSubject(), null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+            auth.setDetails(guildIds);
             SecurityContextHolder.getContext().setAuthentication(auth);
             chain.doFilter(request, response);
         } catch (IllegalArgumentException e) {

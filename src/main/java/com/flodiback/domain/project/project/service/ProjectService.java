@@ -58,6 +58,36 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
+    public List<ProjectResponse> getByGuildIds(List<String> guildIds) {
+        return projectRepository.findByServerGuildIdIn(guildIds).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ProjectResponse getByIdForUser(Long id, List<String> guildIds) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        if (project.getServer() != null
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+        return toResponse(project);
+    }
+
+    @Transactional(readOnly = true)
+    public ProjectResponse getByChannelIdForUser(String channelId, List<String> guildIds) {
+        Project project = projectRepository
+                .findByChannelId(channelId)
+                .orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        if (project.getServer() != null
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+        return toResponse(project);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectResponse getByChannelId(String channelId, String guildId) {
         Project project = projectRepository
                 .findByChannelId(channelId)
