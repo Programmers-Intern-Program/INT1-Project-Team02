@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,7 @@ import com.flodiback.support.AbstractPostgresIntegrationTest;
 
 import jakarta.persistence.EntityManager;
 
+@ActiveProfiles("test")
 @SpringBootTest(properties = {"spring.flyway.enabled=false", "spring.jpa.hibernate.ddl-auto=create-drop"})
 @AutoConfigureMockMvc
 @Transactional
@@ -83,6 +85,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
@@ -115,6 +118,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.resultCode").value("404-1"));
@@ -126,6 +130,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.resultCode").value("400-1"));
@@ -137,6 +142,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody("AI야 인증 방식 뭐로 하기로 했어?")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))
@@ -155,6 +161,7 @@ class InternalSpeechControllerTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(post("/internal/v1/speech")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Internal-Api-Key", "test-internal-key")
                         .content(requestBody("AI야!")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resultCode").value("200-1"))

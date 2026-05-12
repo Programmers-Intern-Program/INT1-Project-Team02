@@ -14,7 +14,7 @@ import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v1/projects/{projectId}/decisions")
+@RequestMapping("/internal/v1/projects/{projectId}/decisions")
 public class DecisionController {
 
     private final DecisionService decisionService;

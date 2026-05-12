@@ -72,6 +72,19 @@ public class MeetingService {
     }
 
     @Transactional(readOnly = true)
+    public MeetingDetailResponse getByIdForUser(Long id, List<String> guildIds) {
+        Meeting meeting =
+                meetingRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 회의입니다."));
+        Project project = meeting.getProject();
+        if (project != null
+                && project.getServer() != null
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+        return toDetailResponse(meeting);
+    }
+
+    @Transactional(readOnly = true)
     public List<MeetingDetailResponse> getByProjectId(Long projectId, String guildId) {
         Project project =
                 projectRepository.findById(projectId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));

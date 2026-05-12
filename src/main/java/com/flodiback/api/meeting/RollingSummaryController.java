@@ -13,7 +13,7 @@ import com.flodiback.global.rsData.RsData;
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("api/v1/meetings")
+@RequestMapping("/internal/v1/meetings")
 @RequiredArgsConstructor
 public class RollingSummaryController {
 

@@ -33,7 +33,14 @@ public class ProjectService {
         }
 
         DiscordServer server = null;
-        if (req.serverId() != null) {
+        if (req.guildId() != null) {
+            server = discordServerRepository
+                    .findByGuildId(req.guildId())
+                    .orElseGet(() -> discordServerRepository.save(DiscordServer.builder()
+                            .guildId(req.guildId())
+                            .guildName(req.guildName() != null ? req.guildName() : req.guildId())
+                            .build()));
+        } else if (req.serverId() != null) {
             server = discordServerRepository
                     .findById(req.serverId())
                     .orElseThrow(() -> new NoSuchElementException("존재하지 않는 서버입니다."));
@@ -55,6 +62,36 @@ public class ProjectService {
     @Transactional(readOnly = true)
     public List<ProjectResponse> getAll() {
         return projectRepository.findAll().stream().map(this::toResponse).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProjectResponse> getByGuildIds(List<String> guildIds) {
+        return projectRepository.findByServerGuildIdIn(guildIds).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public ProjectResponse getByIdForUser(Long id, List<String> guildIds) {
+        Project project =
+                projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        if (project.getServer() != null
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+        return toResponse(project);
+    }
+
+    @Transactional(readOnly = true)
+    public ProjectResponse getByChannelIdForUser(String channelId, List<String> guildIds) {
+        Project project = projectRepository
+                .findByChannelId(channelId)
+                .orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
+        if (project.getServer() != null
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
+        return toResponse(project);
     }
 
     @Transactional(readOnly = true)

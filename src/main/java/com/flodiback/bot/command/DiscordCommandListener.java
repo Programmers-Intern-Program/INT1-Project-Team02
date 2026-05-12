@@ -325,7 +325,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
         try {
             long projectId = Long.parseLong(selected);
-            JsonNode project = fetchData("/api/v1/projects/" + projectId, "프로젝트 상세 조회");
+            JsonNode project = fetchData("/internal/v1/projects/" + projectId, "프로젝트 상세 조회");
             if (project == null) {
                 event.getHook()
                         .sendMessage("프로젝트 정보를 가져오지 못했어요.")
@@ -449,13 +449,13 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void showDashboard(ButtonInteractionEvent event) {
         JsonNode connectedProject =
-                fetchData("/api/v1/projects/channel/" + event.getChannel().getId(), "채널 프로젝트 조회");
+                fetchData("/internal/v1/projects/channel/" + event.getChannel().getId(), "채널 프로젝트 조회");
         if (connectedProject != null) {
             sendProjectDashboard(event, connectedProject, "현재 채널 대시보드예요.");
             return;
         }
 
-        JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
+        JsonNode projects = fetchData("/internal/v1/projects", "프로젝트 목록 조회");
         List<ActionRow> components = new ArrayList<>();
         components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
         components.add(
@@ -473,7 +473,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void sendProjectDashboard(ButtonInteractionEvent event, JsonNode project, String message) {
         long projectId = project.path("id").asLong();
-        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        JsonNode decisions = fetchData("/internal/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
         Long connectedProjectId = fetchProjectIdByChannel(event.getChannel().getIdLong());
         boolean connected = connectedProjectId != null && connectedProjectId == projectId;
         event.getHook()
@@ -486,7 +486,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void sendProjectDashboard(StringSelectInteractionEvent event, JsonNode project, String message) {
         long projectId = project.path("id").asLong();
-        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        JsonNode decisions = fetchData("/internal/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
         Long connectedProjectId = fetchProjectIdByChannel(event.getChannel().getIdLong());
         boolean connected = connectedProjectId != null && connectedProjectId == projectId;
         event.getHook()
@@ -499,7 +499,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void sendProjectDashboard(ModalInteractionEvent event, JsonNode project, String message) {
         long projectId = project.path("id").asLong();
-        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        JsonNode decisions = fetchData("/internal/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
         event.getHook()
                 .sendMessage(message)
                 .addEmbeds(buildProjectDashboardEmbed(event.getGuild(), project, decisions, true)
@@ -520,13 +520,13 @@ public class DiscordCommandListener extends ListenerAdapter {
     }
 
     private void showProjectDashboardOrPicker(Guild guild, MessageChannel channel) {
-        JsonNode connectedProject = fetchData("/api/v1/projects/channel/" + channel.getId(), "채널 프로젝트 조회");
+        JsonNode connectedProject = fetchData("/internal/v1/projects/channel/" + channel.getId(), "채널 프로젝트 조회");
         if (connectedProject != null) {
             sendProjectDashboard(channel, guild, connectedProject);
             return;
         }
 
-        JsonNode projects = fetchData("/api/v1/projects", "프로젝트 목록 조회");
+        JsonNode projects = fetchData("/internal/v1/projects", "프로젝트 목록 조회");
         List<ActionRow> components = new ArrayList<>();
         components.add(ActionRow.of(Button.secondary(BUTTON_PROJECT_CREATE, "프로젝트 생성")));
         components.add(buildWebDashboardLinkRow(guild, channel.getIdLong()));
@@ -545,7 +545,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
     private void sendProjectDashboard(MessageChannel channel, Guild guild, JsonNode project) {
         long projectId = project.path("id").asLong();
-        JsonNode decisions = fetchData("/api/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
+        JsonNode decisions = fetchData("/internal/v1/projects/" + projectId + "/decisions", "프로젝트 결정사항 조회");
         Long connectedProjectId = fetchProjectIdByChannel(channel.getIdLong());
         boolean connected = connectedProjectId != null && connectedProjectId == projectId;
         channel.sendMessageEmbeds(buildProjectDashboardEmbed(guild, project, decisions, connected)
@@ -620,10 +620,11 @@ public class DiscordCommandListener extends ListenerAdapter {
         body.put("name", name);
         putNullable(body, "description", modalValue(event, MODAL_PROJECT_DESCRIPTION));
         putNullable(body, "techStack", modalValue(event, MODAL_PROJECT_TECH_STACK));
-        body.putNull("serverId");
+        body.put("guildId", event.getGuild().getId());
+        body.put("guildName", event.getGuild().getName());
         body.put("channelId", event.getChannel().getId());
 
-        return postData("/api/v1/projects", body, "프로젝트 생성");
+        return postData("/internal/v1/projects", body, "프로젝트 생성");
     }
 
     private String buildStatsMessage(Guild guild) {
@@ -792,7 +793,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         } else {
             try {
                 HttpRequest.Builder req = HttpRequest.newBuilder()
-                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId))
+                        .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + projectId))
                         .GET();
                 attachInternalApiKey(req);
                 HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -821,7 +822,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private void handleProjectList(MessageReceivedEvent event) {
         try {
             HttpRequest.Builder req = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects"))
                     .GET();
             attachInternalApiKey(req);
             HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -849,7 +850,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             try {
                 long id = Long.parseLong(arg);
                 HttpRequest.Builder req = HttpRequest.newBuilder()
-                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + id))
+                        .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + id))
                         .GET();
                 attachInternalApiKey(req);
                 HttpResponse<String> resp = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -863,7 +864,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             } catch (NumberFormatException ignored) {
                 // 숫자가 아니면 name으로 검색
                 HttpRequest.Builder req = HttpRequest.newBuilder()
-                        .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                        .uri(URI.create(internalBaseUrl + "/internal/v1/projects"))
                         .GET();
                 attachInternalApiKey(req);
                 HttpResponse<String> resp = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -885,7 +886,7 @@ public class DiscordCommandListener extends ListenerAdapter {
 
             // 채널에 프로젝트 연결
             HttpRequest.Builder connectReq = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel/" + channelId))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + projectId + "/channel/" + channelId))
                     .PUT(HttpRequest.BodyPublishers.noBody());
             attachInternalApiKey(connectReq);
             attachRequesterHeader(connectReq, event.getAuthor().getId());
@@ -915,7 +916,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
         try {
             HttpRequest.Builder req = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + projectId + "/channel"))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + projectId + "/channel"))
                     .DELETE();
             attachInternalApiKey(req);
             attachRequesterHeader(req, event.getAuthor().getId());
@@ -1013,7 +1014,7 @@ public class DiscordCommandListener extends ListenerAdapter {
                     body.put("techStack", value);
 
                     HttpRequest.Builder req = HttpRequest.newBuilder()
-                            .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + state.projectId()))
+                            .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + state.projectId()))
                             .header("Content-Type", "application/json")
                             .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
                     attachInternalApiKey(req);
@@ -1049,7 +1050,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         if ("yes".equals(input)) {
             try {
                 HttpRequest.Builder req = HttpRequest.newBuilder()
-                        .uri(URI.create(internalBaseUrl + "/api/v1/projects/" + state.projectId()))
+                        .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + state.projectId()))
                         .DELETE();
                 attachInternalApiKey(req);
                 attachRequesterHeader(req, state.userId());
@@ -1212,7 +1213,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         }
         try {
             HttpRequest.Builder req = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings?projectId=" + projectId))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/meetings?projectId=" + projectId))
                     .GET();
             attachInternalApiKey(req);
             HttpResponse<String> response = httpClient.send(req.build(), HttpResponse.BodyHandlers.ofString());
@@ -1278,7 +1279,7 @@ public class DiscordCommandListener extends ListenerAdapter {
         if ("yes".equals(input)) {
             try {
                 HttpRequest.Builder req = HttpRequest.newBuilder()
-                        .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + state.meetingId()))
+                        .uri(URI.create(internalBaseUrl + "/internal/v1/meetings/" + state.meetingId()))
                         .DELETE();
                 attachInternalApiKey(req);
                 attachRequesterHeader(req, state.userId());
@@ -1307,7 +1308,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private Long fetchProjectIdByChannel(long channelId) {
         try {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/projects/channel/" + channelId))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects/channel/" + channelId))
                     .GET();
             attachInternalApiKey(requestBuilder);
 
@@ -1392,12 +1393,13 @@ public class DiscordCommandListener extends ListenerAdapter {
             else body.putNull("description");
             if (techStack != null) body.put("techStack", techStack);
             else body.putNull("techStack");
-            body.putNull("serverId");
+            body.put("guildId", String.valueOf(guildId));
+            body.put("guildName", event.getGuild().getName());
             body.put("channelId", String.valueOf(channelId));
             body.put("ownerDiscordId", event.getAuthor().getId());
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/projects"))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
             attachInternalApiKey(requestBuilder);
@@ -1539,7 +1541,7 @@ public class DiscordCommandListener extends ListenerAdapter {
             body.put("title", "Discord " + guildName + " " + LocalDateTime.now());
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings"))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/meetings"))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
             attachInternalApiKey(requestBuilder);
@@ -1570,7 +1572,7 @@ public class DiscordCommandListener extends ListenerAdapter {
     private void endMeeting(long guildId, long meetingId, String requesterId) {
         try {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/api/v1/meetings/" + meetingId + "/end"))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/meetings/" + meetingId + "/end"))
                     .PUT(HttpRequest.BodyPublishers.noBody());
             attachInternalApiKey(requestBuilder);
             attachRequesterHeader(requestBuilder, requesterId);
