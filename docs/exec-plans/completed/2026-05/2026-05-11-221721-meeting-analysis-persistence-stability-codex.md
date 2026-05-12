@@ -1,7 +1,7 @@
 # 2026-05-11-221721-meeting-analysis-persistence-stability-codex
 
-- author: codex
-- status: completed
+- 작성자: codex
+- 상태: 완료(읽기 전용)
 - created-at: 2026-05-11 22:17:21
 - completed-at: 2026-05-11 22:28:00
 
