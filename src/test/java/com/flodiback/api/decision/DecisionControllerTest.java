@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -34,6 +35,7 @@ import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 
 @Testcontainers
+@ActiveProfiles("test")
 @SpringBootTest(
         properties = {
             "spring.flyway.enabled=false",
