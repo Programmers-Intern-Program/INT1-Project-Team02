@@ -83,8 +83,12 @@ wait_for_nginx_health() {
 
     log "nginx 경유 health check 대기 중"
     for _ in $(seq 1 "$HEALTH_RETRIES"); do
-        body="$("${COMPOSE[@]}" exec -T nginx wget -q -O - "http://localhost/actuator/health" 2>/dev/null || true)"
-        if printf '%s' "$body" | grep -q '"status":"UP"'; then
+        # localhost 대신 127.0.0.1을 사용한다.
+        # Alpine 컨테이너에서 localhost는 IPv6(::1)로 resolve되어 IPv4만 듣는 nginx에 연결이 거부된다.
+        # /nginx-health는 nginx가 직접 200 ok를 반환하는 전용 엔드포인트다.
+        # HTTPS 전환 후 443은 인증서가 없으면 응답 불가하므로 80 포트로 체크한다.
+        body="$("${COMPOSE[@]}" exec -T nginx wget -q -O - "http://127.0.0.1/nginx-health" 2>/dev/null || true)"
+        if printf '%s' "$body" | grep -q 'ok'; then
             log "nginx 경유 health check 성공"
             return
         fi
