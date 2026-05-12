@@ -35,3 +35,18 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Claude Code local-only ###
+.claude/settings.local.json
+CLAUDE.local.md
+
+### Local secrets ###
+.env
+.env.*
+!.env.example
+
+### Terraform ###
+.terraform/
+
+### Deployment runtime files ###
+deploy/nginx/conf.d/upstream.conf

@@ -1,0 +1,19 @@
+#docker-compose.bot.yml은 개발/운영 공통으로 사용할 수 있는 Discord Bot 실행용 Compose 파일입니다. 운영에서는 docker-compose.prod.yml과 함께 사용하여 DB/Redis 서비스에 의존하도록 구성할 수 있습니다.
+services:
+  discord-bot:
+    image: eclipse-temurin:21-jdk
+    platform: linux/amd64
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - gradle-cache:/root/.gradle
+    env_file:
+      - .env
+    environment:
+      ORG_GRADLE_JAVA_INSTALLATIONS_AUTO_DOWNLOAD: "true"
+      REDIS_HOST: host.docker.internal
+    command: ["/bin/bash", "-lc", "./gradlew --no-daemon --console=plain runDiscordBot"]
+    restart: "no"
+
+volumes:
+  gradle-cache:

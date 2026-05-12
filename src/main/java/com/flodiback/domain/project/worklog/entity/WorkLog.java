@@ -35,22 +35,36 @@ public class WorkLog {
     @Column(name = "assignee_name", nullable = false, length = 100)
     private String assigneeName;
 
+    @Column(name = "assignee_discord_id", length = 50)
+    private String assigneeDiscordId;
+
     @Column(name = "task", nullable = false, columnDefinition = "TEXT")
     private String task;
 
     @Column(name = "due_date")
     private LocalDate dueDate;
 
+    @Column(name = "status", nullable = false, length = 20)
+    private String status;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    public WorkLog(Meeting meeting, Project project, String assigneeName, String task, LocalDate dueDate) {
+    public WorkLog(
+            Meeting meeting,
+            Project project,
+            String assigneeName,
+            String assigneeDiscordId,
+            String task,
+            LocalDate dueDate) {
         this.meeting = meeting;
         this.project = project;
         this.assigneeName = assigneeName;
+        this.assigneeDiscordId = assigneeDiscordId;
         this.task = task;
         this.dueDate = dueDate;
+        this.status = "TODO";
     }
 }

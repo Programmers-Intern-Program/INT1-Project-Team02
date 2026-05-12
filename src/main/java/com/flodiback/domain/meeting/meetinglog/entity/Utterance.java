@@ -32,18 +32,44 @@ public class Utterance {
     @Column(name = "speaker_discord_id", nullable = false, length = 50)
     private String speakerDiscordId;
 
+    @Column(name = "speaker_type", nullable = false, length = 20)
+    private String speakerType;
+
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "speech_started_at", nullable = false)
+    private LocalDateTime speechStartedAt;
+
+    @Column(name = "speech_ended_at")
+    private LocalDateTime speechEndedAt;
+
+    @Column(name = "token_count")
+    private Integer tokenCount;
+
     @CreationTimestamp
-    @Column(name = "spoken_at", nullable = false, updatable = false)
-    private LocalDateTime spokenAt;
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
 
     @Builder
-    public Utterance(Meeting meeting, String speakerName, String speakerDiscordId, String content) {
+    public Utterance(
+            Meeting meeting,
+            String speakerName,
+            String speakerDiscordId,
+            String speakerType,
+            String content,
+            LocalDateTime speechStartedAt,
+            LocalDateTime speechEndedAt,
+            Integer tokenCount,
+            LocalDateTime createdAt) {
         this.meeting = meeting;
         this.speakerName = speakerName;
         this.speakerDiscordId = speakerDiscordId;
+        this.speakerType = speakerType != null ? speakerType : "HUMAN";
         this.content = content;
+        this.speechStartedAt = speechStartedAt != null ? speechStartedAt : LocalDateTime.now();
+        this.speechEndedAt = speechEndedAt;
+        this.tokenCount = tokenCount;
+        this.createdAt = createdAt;
     }
 }
