@@ -69,7 +69,7 @@ spotless {
 }
 
 group = "com"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.0"
 description = "flodi-back"
 
 java {
