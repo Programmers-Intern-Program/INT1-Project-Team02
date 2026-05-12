@@ -1,3 +1,4 @@
+#docker-compose.yml은 개발 환경에서 DB와 Redis를 간단히 띄우기 위한 Compose 파일입니다.
 services:
   db:
     image: pgvector/pgvector:pg16
