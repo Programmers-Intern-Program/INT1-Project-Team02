@@ -44,3 +44,9 @@ CLAUDE.local.md
 .env
 .env.*
 !.env.example
+
+### Terraform ###
+.terraform/
+
+### Deployment runtime files ###
+deploy/nginx/conf.d/upstream.conf

@@ -1,0 +1,28 @@
+name: Release Please
+
+on:
+  push:
+    branches: [ dev ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: dev
+
+      - name: Discord 알림 (릴리즈 생성)
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          curl -s -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{\"title\":\"릴리즈 생성 🏷️\",\"description\":\"**버전**: ${{ steps.release.outputs.tag_name }}\\n**커밋**: ${{ github.sha }}\",\"color\":3066993}]}" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}
