@@ -40,9 +40,12 @@ jobs:
             [ -z "$PR_NUM" ] && continue
 
             # [fix]: desc  → fix: desc
+            # [fix]:desc   → fix: desc  (공백 없는 경우)
             # [fix] desc   → fix: desc
             # [feat]: desc → feat: desc
+            # feat desc    → feat: desc (대괄호 없이 콜론만 없는 경우)
             NORMALIZED=$(echo "$TITLE" | sed -E \
+              -e 's/^\[([a-zA-Z]+)\]:([^ ])/\1: \2/' \
               -e 's/^\[([a-zA-Z]+)\]: /\1: /' \
               -e 's/^\[([a-zA-Z]+)\] /\1: /' \
               -e 's/^\[([a-zA-Z]+)\]$/\1:/')
