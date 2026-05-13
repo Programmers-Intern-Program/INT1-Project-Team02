@@ -12,6 +12,39 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PR 제목 정규화 (release-please 전처리)
+        # [fix]: / [feat] 등 대괄호 형식 → fix: / feat: 형식으로 변환
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          RANGE="${LAST_TAG:+${LAST_TAG}..}HEAD"
+
+          git log "$RANGE" --pretty=format:"%s" --merges | while IFS= read -r msg; do
+            PR_NUM=$(echo "$msg" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+            [ -z "$PR_NUM" ] && continue
+
+            TITLE=$(gh pr view "$PR_NUM" --json title -q '.title' 2>/dev/null || true)
+            [ -z "$TITLE" ] && continue
+
+            # [fix]: desc  → fix: desc
+            # [fix] desc   → fix: desc
+            # [feat]: desc → feat: desc
+            NORMALIZED=$(echo "$TITLE" | sed -E \
+              -e 's/^\[([a-zA-Z]+)\]: /\1: /' \
+              -e 's/^\[([a-zA-Z]+)\] /\1: /' \
+              -e 's/^\[([a-zA-Z]+)\]$/\1:/')
+
+            if [ "$TITLE" != "$NORMALIZED" ]; then
+              echo "정규화: #${PR_NUM} '$TITLE' → '$NORMALIZED'"
+              gh pr edit "$PR_NUM" --title "$NORMALIZED"
+            fi
+          done
+
       - uses: googleapis/release-please-action@v4
         id: release
         with:
