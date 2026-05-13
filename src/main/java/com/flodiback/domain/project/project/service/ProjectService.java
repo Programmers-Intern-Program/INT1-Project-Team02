@@ -1,11 +1,15 @@
 package com.flodiback.domain.project.project.service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
 import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
@@ -13,6 +17,7 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
 import com.flodiback.domain.server.server.repository.DiscordServerRepository;
+import com.flodiback.global.enums.MeetingStatus;
 import com.flodiback.global.exception.ServiceException;
 
 import lombok.RequiredArgsConstructor;
@@ -24,6 +29,7 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final DiscordServerRepository discordServerRepository;
+    private final MeetingRepository meetingRepository;
 
     public ProjectResponse create(CreateProjectRequest req) {
         if (req.channelId() != null) {
@@ -56,18 +62,24 @@ public class ProjectService {
                 .build();
         projectRepository.save(project);
 
-        return toResponse(project);
+        return toResponse(project, null);
     }
 
     @Transactional(readOnly = true)
     public List<ProjectResponse> getAll() {
-        return projectRepository.findAll().stream().map(this::toResponse).toList();
+        List<Project> projects = projectRepository.findAll();
+        Map<Long, Long> activeMeetingIdMap = buildActiveMeetingIdMap(projects);
+        return projects.stream()
+                .map(p -> toResponse(p, activeMeetingIdMap.get(p.getId())))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<ProjectResponse> getByGuildIds(List<String> guildIds) {
-        return projectRepository.findByServerGuildIdIn(guildIds).stream()
-                .map(this::toResponse)
+        List<Project> projects = projectRepository.findByServerGuildIdIn(guildIds);
+        Map<Long, Long> activeMeetingIdMap = buildActiveMeetingIdMap(projects);
+        return projects.stream()
+                .map(p -> toResponse(p, activeMeetingIdMap.get(p.getId())))
                 .toList();
     }
 
@@ -79,7 +91,7 @@ public class ProjectService {
                 && !guildIds.contains(project.getServer().getGuildId())) {
             throw new ServiceException("403-1", "권한이 없습니다.");
         }
-        return toResponse(project);
+        return toResponseWithActiveMeeting(project);
     }
 
     @Transactional(readOnly = true)
@@ -91,7 +103,7 @@ public class ProjectService {
                 && !guildIds.contains(project.getServer().getGuildId())) {
             throw new ServiceException("403-1", "권한이 없습니다.");
         }
-        return toResponse(project);
+        return toResponseWithActiveMeeting(project);
     }
 
     @Transactional(readOnly = true)
@@ -100,7 +112,7 @@ public class ProjectService {
                 .findByChannelId(channelId)
                 .orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         checkReadPermission(project, guildId);
-        return toResponse(project);
+        return toResponseWithActiveMeeting(project);
     }
 
     @Transactional(readOnly = true)
@@ -108,7 +120,7 @@ public class ProjectService {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         checkReadPermission(project, guildId);
-        return toResponse(project);
+        return toResponseWithActiveMeeting(project);
     }
 
     public ProjectResponse update(Long id, UpdateProjectRequest req, String requesterId) {
@@ -116,7 +128,7 @@ public class ProjectService {
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         checkWritePermission(project, requesterId);
         project.update(req.name(), req.description(), req.techStack());
-        return toResponse(project);
+        return toResponseWithActiveMeeting(project);
     }
 
     public void connectChannel(Long id, String channelId, String requesterId) {
@@ -154,13 +166,31 @@ public class ProjectService {
         }
     }
 
-    ProjectResponse toResponse(Project project) {
+    private Map<Long, Long> buildActiveMeetingIdMap(List<Project> projects) {
+        if (projects.isEmpty()) return Map.of();
+        List<Long> projectIds = projects.stream().map(Project::getId).toList();
+        return meetingRepository.findActiveByProjectIds(projectIds, MeetingStatus.IN_PROGRESS).stream()
+                .collect(Collectors.toMap(
+                        m -> m.getProject().getId(), Meeting::getId, (first, duplicate) -> first)); // 먼저 삽입된 값(최신)을 유지
+    }
+
+    private ProjectResponse toResponseWithActiveMeeting(Project project) {
+        Long activeMeetingId = meetingRepository
+                .findFirstByProjectAndStatusOrderByStartedAtDesc(project, MeetingStatus.IN_PROGRESS)
+                .map(Meeting::getId)
+                .orElse(null);
+        return toResponse(project, activeMeetingId);
+    }
+
+    private ProjectResponse toResponse(Project project, Long activeMeetingId) {
         return new ProjectResponse(
                 project.getId(),
                 project.getServer() != null ? project.getServer().getId() : null,
                 project.getName(),
                 project.getDescription(),
                 project.getTechStack(),
-                project.getCreatedAt());
+                project.getCreatedAt(),
+                project.getChannelId(),
+                activeMeetingId);
     }
 }
