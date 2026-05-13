@@ -27,7 +27,8 @@ public class MeetingController {
     @GetMapping
     public RsData<List<MeetingDetailResponse>> getMeetings(
             @RequestParam Long projectId, @RequestHeader(name = "X-Guild-Id", required = false) String guildId) {
-        return RsData.of("200-1", "회의 목록 조회 성공.", service.getByProjectId(projectId, guildId));
+        return RsData.of("200-1", "회의 목록 조회 성공.", service.getByProjectId(
+                projectId, guildId != null ? List.of(guildId) : List.of()));
     }
 
     @PutMapping("/{id}/end")

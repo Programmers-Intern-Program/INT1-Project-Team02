@@ -26,8 +26,7 @@ public class WebMeetingController {
     @GetMapping("/api/v1/projects/{projectId}/meetings")
     public ResponseEntity<RsData<List<MeetingDetailResponse>>> getMeetingsByProject(@PathVariable Long projectId) {
         List<String> guildIds = SecurityContextUtil.getGuildIds();
-        List<MeetingDetailResponse> meetings =
-                meetingService.getByProjectId(projectId, guildIds.isEmpty() ? null : guildIds.getFirst());
+        List<MeetingDetailResponse> meetings = meetingService.getByProjectId(projectId, guildIds);
         return ResponseEntity.ok(RsData.of("200-1", "회의 목록 조회 성공.", meetings));
     }
 
