@@ -10,9 +10,20 @@ import com.flodiback.domain.speech.stt.SttResult;
  */
 final class OpenAiRealtimeEventHandler {
     private static final Logger log = LoggerFactory.getLogger(OpenAiRealtimeEventHandler.class);
+    private static final OpenAiRealtimeRateLimitGate SHARED_RATE_LIMIT_GATE = new OpenAiRealtimeRateLimitGate();
     // OpenAI Realtime에는 24kHz mono PCM16LE를 보낸다.
     // 24,000 samples/sec * 2 bytes = 48 bytes/ms 이므로 전송 바이트로 길이를 역산할 수 있다.
     private static final long REALTIME_PCM_BYTES_PER_MS = 48L;
+
+    private final OpenAiRealtimeRateLimitGate rateLimitGate;
+
+    OpenAiRealtimeEventHandler() {
+        this(SHARED_RATE_LIMIT_GATE);
+    }
+
+    OpenAiRealtimeEventHandler(OpenAiRealtimeRateLimitGate rateLimitGate) {
+        this.rateLimitGate = rateLimitGate;
+    }
 
     /**
      * 중간 결과(delta) 이벤트 처리.
@@ -99,8 +110,13 @@ final class OpenAiRealtimeEventHandler {
      * - commit 대기 future를 실패로 종료
      */
     void onError(OpenAiSttSessionState session, Throwable throwable) {
+        rateLimitGate.recordIfRateLimited(throwable);
         log.warn("[OPENAI/이벤트오류] sessionId={}", session.sessionId(), throwable);
         session.sttListener().onError(session.sessionId(), throwable);
         session.markFailed(throwable);
+    }
+
+    OpenAiRealtimeRateLimitGate rateLimitGate() {
+        return rateLimitGate;
     }
 }

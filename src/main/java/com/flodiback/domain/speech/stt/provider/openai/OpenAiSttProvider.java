@@ -51,6 +51,12 @@ public class OpenAiSttProvider implements SttProvider {
     @Override
     public void startSession(String sessionId, String speakerId, SttListener listener) {
         SttListener nonNullListener = Objects.requireNonNull(listener);
+        if (eventHandler.rateLimitGate().isBlocked()) {
+            IllegalStateException exception = eventHandler.rateLimitGate().blockedException(sessionId);
+            nonNullListener.onError(sessionId, exception);
+            throw exception;
+        }
+
         OpenAiSttSessionState newSession = new OpenAiSttSessionState(sessionId, speakerId, nonNullListener);
 
         OpenAiSttSessionState oldSession = sessions.put(sessionId, newSession);
@@ -62,6 +68,7 @@ public class OpenAiSttProvider implements SttProvider {
             realtimeClient.openSession(newSession, eventHandler);
         } catch (Exception exception) {
             sessions.remove(sessionId, newSession);
+            eventHandler.rateLimitGate().recordIfRateLimited(exception);
             nonNullListener.onError(sessionId, exception);
             throw new IllegalStateException("Failed to open OpenAI STT session. sessionId=" + sessionId, exception);
         }
@@ -71,6 +78,13 @@ public class OpenAiSttProvider implements SttProvider {
     public void sendPcm(String sessionId, byte[] pcm16le, long timestampMs) {
         OpenAiSttSessionState session = sessions.get(sessionId);
         if (session == null || pcm16le == null || pcm16le.length == 0) {
+            return;
+        }
+        if (eventHandler.rateLimitGate().isBlocked()) {
+            sessions.remove(sessionId, session);
+            realtimeClient.closeSessionQuietly(session);
+            session.sttListener()
+                    .onError(sessionId, eventHandler.rateLimitGate().blockedException(sessionId));
             return;
         }
         try {

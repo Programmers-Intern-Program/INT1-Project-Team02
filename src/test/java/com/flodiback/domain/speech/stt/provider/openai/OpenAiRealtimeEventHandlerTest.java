@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
@@ -48,8 +49,30 @@ class OpenAiRealtimeEventHandlerTest {
         assertThat(result.audioDurationMs()).isEqualTo(200L);
     }
 
+    @Test
+    void onError_recordsRealtimeRateLimitCooldown() {
+        AtomicLong now = new AtomicLong(1_000L);
+        OpenAiRealtimeRateLimitGate rateLimitGate = new OpenAiRealtimeRateLimitGate(now::get);
+        OpenAiRealtimeEventHandler rateLimitedEventHandler = new OpenAiRealtimeEventHandler(rateLimitGate);
+        CapturingSttListener listener = new CapturingSttListener();
+        OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", listener);
+
+        rateLimitedEventHandler.onError(
+                session,
+                new RuntimeException(
+                        "Rate limit reached for gpt-realtime on requests per day. Please try again in 1m26.4s."));
+
+        assertThat(rateLimitGate.remainingMillis()).isEqualTo(86_900L);
+        assertThat(listener.onlyError().getMessage()).contains("Rate limit reached");
+
+        now.addAndGet(86_901L);
+
+        assertThat(rateLimitGate.isBlocked()).isFalse();
+    }
+
     private static final class CapturingSttListener implements SttListener {
         private final List<SttResult> results = new ArrayList<>();
+        private final List<Throwable> errors = new ArrayList<>();
 
         @Override
         public void onResult(SttResult result) {
@@ -58,12 +81,17 @@ class OpenAiRealtimeEventHandlerTest {
 
         @Override
         public void onError(String sessionId, Throwable throwable) {
-            throw new AssertionError("Unexpected STT error", throwable);
+            errors.add(throwable);
         }
 
         private SttResult onlyResult() {
             assertThat(results).hasSize(1);
             return results.get(0);
+        }
+
+        private Throwable onlyError() {
+            assertThat(errors).hasSize(1);
+            return errors.get(0);
         }
     }
 }
