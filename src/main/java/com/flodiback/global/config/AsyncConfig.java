@@ -44,4 +44,22 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean(name = "contextProgressExecutor")
+    public Executor contextProgressExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(2);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("context-progress-");
+        executor.setRejectedExecutionHandler((runnable, poolExecutor) -> {
+            ThreadPoolExecutor pool = (ThreadPoolExecutor) poolExecutor;
+            log.warn(
+                    "Context progress task rejected. activeCount={}, queueSize={}",
+                    pool.getActiveCount(),
+                    pool.getQueue().size());
+        });
+        executor.initialize();
+        return executor;
+    }
 }
