@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
@@ -44,6 +45,9 @@ class ProjectServiceTest {
 
     @Mock
     private MeetingRepository meetingRepository;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     // ─── create ───────────────────────────────────────────
 
