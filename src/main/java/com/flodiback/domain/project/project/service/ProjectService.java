@@ -186,6 +186,7 @@ public class ProjectService {
         return new ProjectResponse(
                 project.getId(),
                 project.getServer() != null ? project.getServer().getId() : null,
+                project.getServer() != null ? project.getServer().getGuildName() : null,
                 project.getName(),
                 project.getDescription(),
                 project.getTechStack(),
