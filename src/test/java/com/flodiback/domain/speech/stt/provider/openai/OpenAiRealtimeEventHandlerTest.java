@@ -70,6 +70,30 @@ class OpenAiRealtimeEventHandlerTest {
         assertThat(rateLimitGate.isBlocked()).isFalse();
     }
 
+    @Test
+    void appendBufferedPcmAndDrainIfDue_batchesSmallAudioFrames() {
+        OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", new CapturingSttListener());
+
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L))
+                .isEmpty();
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {3, 4}, 1_240L, 500L))
+                .isEmpty();
+
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {5, 6}, 1_500L, 500L))
+                .containsExactly(1, 2, 3, 4, 5, 6);
+    }
+
+    @Test
+    void drainBufferedPcm_flushesRemainingAudioBeforeCommit() {
+        OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", new CapturingSttListener());
+
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L))
+                .isEmpty();
+
+        assertThat(session.drainBufferedPcm()).containsExactly(1, 2);
+        assertThat(session.drainBufferedPcm()).isEmpty();
+    }
+
     private static final class CapturingSttListener implements SttListener {
         private final List<SttResult> results = new ArrayList<>();
         private final List<Throwable> errors = new ArrayList<>();

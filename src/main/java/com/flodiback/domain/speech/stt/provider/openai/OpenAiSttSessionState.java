@@ -1,5 +1,6 @@
 package com.flodiback.domain.speech.stt.provider.openai;
 
+import java.io.ByteArrayOutputStream;
 import java.net.http.WebSocket;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -33,6 +34,10 @@ final class OpenAiSttSessionState {
     private final AtomicLong lastAudioAtMs = new AtomicLong();
     // endSession이 호출되었는지 상태 플래그
     private final AtomicBoolean endRequested = new AtomicBoolean(false);
+    // OpenAI Realtime append 요청 수를 줄이기 위한 PCM 배치 버퍼
+    private final Object bufferedPcmLock = new Object();
+    private final ByteArrayOutputStream bufferedPcm = new ByteArrayOutputStream();
+    private long bufferedPcmStartedAtMs = 0L;
 
     // OpenAI item_id별 delta 누적 버퍼
     private final Map<String, StringBuilder> partialByItemId = new ConcurrentHashMap<>();
@@ -78,6 +83,36 @@ final class OpenAiSttSessionState {
 
     long lastAudioAtMs() {
         return lastAudioAtMs.get();
+    }
+
+    byte[] appendBufferedPcmAndDrainIfDue(byte[] pcm, long timestampMs, long flushIntervalMs) {
+        if (pcm == null || pcm.length == 0) {
+            return new byte[0];
+        }
+        long normalizedTimestampMs = timestampMs > 0 ? timestampMs : System.currentTimeMillis();
+        synchronized (bufferedPcmLock) {
+            if (bufferedPcmStartedAtMs == 0L) {
+                bufferedPcmStartedAtMs = normalizedTimestampMs;
+            }
+            bufferedPcm.writeBytes(pcm);
+            if (normalizedTimestampMs - bufferedPcmStartedAtMs < flushIntervalMs) {
+                return new byte[0];
+            }
+            return drainBufferedPcmLocked();
+        }
+    }
+
+    byte[] drainBufferedPcm() {
+        synchronized (bufferedPcmLock) {
+            return drainBufferedPcmLocked();
+        }
+    }
+
+    private byte[] drainBufferedPcmLocked() {
+        byte[] drained = bufferedPcm.toByteArray();
+        bufferedPcm.reset();
+        bufferedPcmStartedAtMs = 0L;
+        return drained;
     }
 
     void markEndRequested() {
