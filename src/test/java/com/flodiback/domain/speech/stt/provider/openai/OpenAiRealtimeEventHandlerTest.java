@@ -74,20 +74,31 @@ class OpenAiRealtimeEventHandlerTest {
     void appendBufferedPcmAndDrainIfDue_batchesSmallAudioFrames() {
         OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", new CapturingSttListener());
 
-        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L))
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L, 10))
                 .isEmpty();
-        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {3, 4}, 1_240L, 500L))
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {3, 4}, 1_240L, 500L, 10))
                 .isEmpty();
 
-        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {5, 6}, 1_500L, 500L))
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {5, 6}, 1_500L, 500L, 10))
                 .containsExactly(1, 2, 3, 4, 5, 6);
+    }
+
+    @Test
+    void appendBufferedPcmAndDrainIfDue_flushesWhenBufferLimitReached() {
+        OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", new CapturingSttListener());
+
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 5_000L, 4))
+                .isEmpty();
+
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {3, 4}, 1_020L, 5_000L, 4))
+                .containsExactly(1, 2, 3, 4);
     }
 
     @Test
     void drainBufferedPcm_flushesRemainingAudioBeforeCommit() {
         OpenAiSttSessionState session = new OpenAiSttSessionState("session-1", "speaker-1", new CapturingSttListener());
 
-        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L))
+        assertThat(session.appendBufferedPcmAndDrainIfDue(new byte[] {1, 2}, 1_000L, 500L, 10))
                 .isEmpty();
 
         assertThat(session.drainBufferedPcm()).containsExactly(1, 2);

@@ -19,6 +19,9 @@ public class OpenAiSttProvider implements SttProvider {
     private static final String ENV_OPENAI_REALTIME_APPEND_FLUSH_MS = "OPENAI_REALTIME_APPEND_FLUSH_MS";
     private static final long DEFAULT_APPEND_FLUSH_MS = 500L;
     private static final long MIN_APPEND_FLUSH_MS = 100L;
+    private static final long MAX_APPEND_FLUSH_MS = 5_000L;
+    private static final int REALTIME_PCM_BYTES_PER_MS = 48;
+    private static final int MAX_BUFFERED_PCM_BYTES = Math.toIntExact(MAX_APPEND_FLUSH_MS * REALTIME_PCM_BYTES_PER_MS);
 
     private final Map<String, OpenAiSttSessionState> sessions = new ConcurrentHashMap<>();
     private final OpenAiRealtimeClient realtimeClient;
@@ -102,8 +105,8 @@ public class OpenAiSttProvider implements SttProvider {
             }
             pcmDebugDumper.capture(sessionId, pcm16le, realtimePcm);
             session.recordSentPcm(realtimePcm.length, timestampMs);
-            byte[] bufferedPcm =
-                    session.appendBufferedPcmAndDrainIfDue(realtimePcm, timestampMs, appendFlushIntervalMs);
+            byte[] bufferedPcm = session.appendBufferedPcmAndDrainIfDue(
+                    realtimePcm, timestampMs, appendFlushIntervalMs, MAX_BUFFERED_PCM_BYTES);
             if (bufferedPcm.length > 0) {
                 realtimeClient.appendAudio(session, bufferedPcm, timestampMs);
             }
@@ -139,7 +142,8 @@ public class OpenAiSttProvider implements SttProvider {
             return DEFAULT_APPEND_FLUSH_MS;
         }
         try {
-            return Long.parseLong(value.trim());
+            long parsed = Long.parseLong(value.trim());
+            return Math.min(parsed, MAX_APPEND_FLUSH_MS);
         } catch (NumberFormatException ignored) {
             return DEFAULT_APPEND_FLUSH_MS;
         }

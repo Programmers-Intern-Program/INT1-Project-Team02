@@ -85,7 +85,7 @@ final class OpenAiSttSessionState {
         return lastAudioAtMs.get();
     }
 
-    byte[] appendBufferedPcmAndDrainIfDue(byte[] pcm, long timestampMs, long flushIntervalMs) {
+    byte[] appendBufferedPcmAndDrainIfDue(byte[] pcm, long timestampMs, long flushIntervalMs, int maxBufferedPcmBytes) {
         if (pcm == null || pcm.length == 0) {
             return new byte[0];
         }
@@ -95,7 +95,9 @@ final class OpenAiSttSessionState {
                 bufferedPcmStartedAtMs = normalizedTimestampMs;
             }
             bufferedPcm.writeBytes(pcm);
-            if (normalizedTimestampMs - bufferedPcmStartedAtMs < flushIntervalMs) {
+            boolean intervalReached = normalizedTimestampMs - bufferedPcmStartedAtMs >= flushIntervalMs;
+            boolean bufferLimitReached = bufferedPcm.size() >= maxBufferedPcmBytes;
+            if (!intervalReached && !bufferLimitReached) {
                 return new byte[0];
             }
             return drainBufferedPcmLocked();
