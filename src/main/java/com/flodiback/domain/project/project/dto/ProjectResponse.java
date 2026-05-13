@@ -3,4 +3,11 @@ package com.flodiback.domain.project.project.dto;
 import java.time.LocalDateTime;
 
 public record ProjectResponse(
-        Long id, Long serverId, String name, String description, String techStack, LocalDateTime createdAt) {}
+        Long id,
+        Long serverId,
+        String name,
+        String description,
+        String techStack,
+        LocalDateTime createdAt,
+        String channelId,
+        Long activeMeetingId) {}

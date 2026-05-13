@@ -14,6 +14,7 @@ import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.MeetingDetailResponse;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
+import com.flodiback.domain.meeting.meeting.event.MeetingStartedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
@@ -42,6 +43,11 @@ public class MeetingService {
         Meeting meeting = Meeting.builder().project(project).title(req.title()).build();
         meetingRepository.save(meeting);
 
+        if (project != null) {
+            eventPublisher.publishEvent(
+                    new MeetingStartedEvent(meeting.getId(), project.getId(), project.getChannelId()));
+        }
+
         return new CreateMeetingResponse(
                 meeting.getId(),
                 project != null ? project.getId() : null,
@@ -59,7 +65,9 @@ public class MeetingService {
         meeting.end();
         meetingRepository.save(meeting);
 
-        eventPublisher.publishEvent(new MeetingEndedEvent(meeting.getId()));
+        Long projectId = meeting.getProject() != null ? meeting.getProject().getId() : null;
+        String channelId = meeting.getProject() != null ? meeting.getProject().getChannelId() : null;
+        eventPublisher.publishEvent(new MeetingEndedEvent(meeting.getId(), projectId, channelId));
         return toDetailResponse(meeting);
     }
 
