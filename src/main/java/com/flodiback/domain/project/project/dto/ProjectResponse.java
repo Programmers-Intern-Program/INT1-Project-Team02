@@ -11,4 +11,5 @@ public record ProjectResponse(
         String techStack,
         LocalDateTime createdAt,
         String channelId,
+        String channelName,
         Long activeMeetingId) {}

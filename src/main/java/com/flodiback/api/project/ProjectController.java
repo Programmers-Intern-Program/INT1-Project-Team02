@@ -62,8 +62,9 @@ public class ProjectController {
     public RsData<Void> connectChannel(
             @PathVariable Long id,
             @PathVariable String channelId,
+            @RequestParam(required = false) String channelName,
             @RequestHeader(name = "X-Requester-Id", required = false) String requesterId) {
-        projectService.connectChannel(id, channelId, requesterId);
+        projectService.connectChannel(id, channelId, channelName, requesterId);
         return RsData.of("200-1", "채널이 연결되었습니다.");
     }
 

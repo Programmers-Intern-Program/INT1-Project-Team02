@@ -36,6 +36,9 @@ public class Project {
     @Column(name = "channel_id", length = 50)
     private String channelId;
 
+    @Column(name = "channel_name", length = 100)
+    private String channelName;
+
     @Column(name = "owner_discord_id", length = 50)
     private String ownerDiscordId;
 
@@ -65,12 +68,14 @@ public class Project {
         if (techStack != null) this.techStack = techStack;
     }
 
-    public void connectChannel(String channelId) {
+    public void connectChannel(String channelId, String channelName) {
         this.channelId = channelId;
+        this.channelName = channelName;
     }
 
     public void disconnectChannel() {
         this.channelId = null;
+        this.channelName = null;
     }
 
     public void softDelete() {
