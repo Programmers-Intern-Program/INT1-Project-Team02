@@ -17,7 +17,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import com.flodiback.domain.meeting.meeting.entity.Meeting;
+import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
 import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
@@ -25,6 +28,7 @@ import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
 import com.flodiback.domain.server.server.repository.DiscordServerRepository;
+import com.flodiback.global.enums.MeetingStatus;
 
 @ExtendWith(MockitoExtension.class)
 class ProjectServiceTest {
@@ -37,6 +41,9 @@ class ProjectServiceTest {
 
     @Mock
     private DiscordServerRepository discordServerRepository;
+
+    @Mock
+    private MeetingRepository meetingRepository;
 
     // ─── create ───────────────────────────────────────────
 
@@ -98,6 +105,7 @@ class ProjectServiceTest {
         Project p1 = Project.builder().name("프로젝트 A").build();
         Project p2 = Project.builder().name("프로젝트 B").build();
         willReturn(List.of(p1, p2)).given(projectRepository).findAll();
+        given(meetingRepository.findActiveByProjectIds(any(), any())).willReturn(List.of());
 
         // when
         List<ProjectResponse> responses = projectService.getAll();
@@ -107,6 +115,24 @@ class ProjectServiceTest {
         assertThat(responses).hasSize(2);
         assertThat(responses.get(0).name()).isEqualTo("프로젝트 A");
         assertThat(responses.get(1).name()).isEqualTo("프로젝트 B");
+    }
+
+    @Test
+    void getAll_활성회의가_있는_프로젝트는_activeMeetingId_반환() {
+        // given
+        Project p1 = Project.builder().name("프로젝트 A").build();
+        ReflectionTestUtils.setField(p1, "id", 1L);
+        Meeting meeting = Meeting.builder().project(p1).title("회의").build();
+        ReflectionTestUtils.setField(meeting, "id", 42L);
+        willReturn(List.of(p1)).given(projectRepository).findAll();
+        given(meetingRepository.findActiveByProjectIds(List.of(1L), MeetingStatus.IN_PROGRESS))
+                .willReturn(List.of(meeting));
+
+        // when
+        List<ProjectResponse> responses = projectService.getAll();
+
+        // then
+        assertThat(responses.get(0).activeMeetingId()).isEqualTo(42L);
     }
 
     // ─── getById ──────────────────────────────────────────
@@ -120,6 +146,8 @@ class ProjectServiceTest {
                 .techStack("Java")
                 .build();
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+        given(meetingRepository.findFirstByProjectAndStatusOrderByStartedAtDesc(project, MeetingStatus.IN_PROGRESS))
+                .willReturn(Optional.empty());
 
         // when
         ProjectResponse response = projectService.getById(1L, null);
@@ -153,6 +181,8 @@ class ProjectServiceTest {
                 .build();
         UpdateProjectRequest req = new UpdateProjectRequest("새 이름", "새 설명", "Kotlin");
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+        given(meetingRepository.findFirstByProjectAndStatusOrderByStartedAtDesc(project, MeetingStatus.IN_PROGRESS))
+                .willReturn(Optional.empty());
 
         // when
         ProjectResponse response = projectService.update(1L, req, null);

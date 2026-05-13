@@ -12,16 +12,19 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingRequest;
 import com.flodiback.domain.meeting.meeting.dto.CreateMeetingResponse;
 import com.flodiback.domain.meeting.meeting.dto.MeetingDetailResponse;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
 import com.flodiback.domain.meeting.meeting.event.MeetingEndedEvent;
+import com.flodiback.domain.meeting.meeting.event.MeetingStartedEvent;
 import com.flodiback.domain.meeting.meeting.repository.MeetingRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
@@ -56,6 +59,7 @@ class MeetingServiceTest {
         // then
         verify(projectRepository, never()).findById(any());
         verify(meetingRepository).save(any(Meeting.class));
+        verify(eventPublisher, never()).publishEvent(any());
         assertThat(response.projectId()).isNull();
         assertThat(response.title()).isEqualTo("테스트 회의");
         assertThat(response.status()).isEqualTo(MeetingStatus.IN_PROGRESS);
@@ -66,9 +70,14 @@ class MeetingServiceTest {
     void create_유효한_projectId면_미팅생성() {
         // given
         Project project = Project.builder().name("테스트 프로젝트").build();
+        ReflectionTestUtils.setField(project, "id", 1L);
         CreateMeetingRequest req = new CreateMeetingRequest(1L, "테스트 회의");
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
-        given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> {
+            Meeting m = invocation.getArgument(0);
+            ReflectionTestUtils.setField(m, "id", 10L);
+            return m;
+        });
 
         // when
         CreateMeetingResponse response = meetingService.create(req);
@@ -79,6 +88,12 @@ class MeetingServiceTest {
         assertThat(response.title()).isEqualTo("테스트 회의");
         assertThat(response.status()).isEqualTo(MeetingStatus.IN_PROGRESS);
         assertThat(response.projectConnected()).isTrue();
+
+        ArgumentCaptor<MeetingStartedEvent> captor = ArgumentCaptor.forClass(MeetingStartedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().meetingId()).isEqualTo(10L);
+        assertThat(captor.getValue().projectId()).isEqualTo(1L);
+        assertThat(captor.getValue().channelId()).isNull();
     }
 
     @Test
@@ -145,7 +160,7 @@ class MeetingServiceTest {
     @Test
     void end_유효한_id면_MeetingEndedEvent_발행() {
         // given
-        Meeting meeting = Meeting.builder().title("테스트 회의").build();
+        Meeting meeting = Meeting.builder().title("테스트 회의").build(); // project 없음
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
 
@@ -153,7 +168,29 @@ class MeetingServiceTest {
         meetingService.end(1L, null);
 
         // then
-        verify(eventPublisher).publishEvent(any(MeetingEndedEvent.class));
+        ArgumentCaptor<MeetingEndedEvent> captor = ArgumentCaptor.forClass(MeetingEndedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().projectId()).isNull();
+        assertThat(captor.getValue().channelId()).isNull();
+    }
+
+    @Test
+    void end_project_있는_회의_종료_시_projectId_channelId_채워짐() {
+        // given
+        Project project = Project.builder().channelId("ch-123").build();
+        ReflectionTestUtils.setField(project, "id", 1L);
+        Meeting meeting = Meeting.builder().project(project).title("회의").build();
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(meetingRepository.save(any(Meeting.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+        // when
+        meetingService.end(1L, null);
+
+        // then
+        ArgumentCaptor<MeetingEndedEvent> captor = ArgumentCaptor.forClass(MeetingEndedEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().projectId()).isEqualTo(1L);
+        assertThat(captor.getValue().channelId()).isEqualTo("ch-123");
     }
 
     @Test

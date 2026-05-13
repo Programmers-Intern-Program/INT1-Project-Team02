@@ -25,6 +25,10 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long> {
     @Query("select m.id from Meeting m where m.status = :status")
     List<Long> findIdsByStatus(@Param("status") MeetingStatus status);
 
+    @Query("select m from Meeting m where m.project.id in :projectIds and m.status = :status order by m.startedAt desc")
+    List<Meeting> findActiveByProjectIds(
+            @Param("projectIds") List<Long> projectIds, @Param("status") MeetingStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Meeting m where m.id = :id")
     Optional<Meeting> findByIdForUpdate(@Param("id") Long id);

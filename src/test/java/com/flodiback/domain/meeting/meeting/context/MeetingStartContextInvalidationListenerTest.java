@@ -18,7 +18,7 @@ class MeetingStartContextInvalidationListenerTest {
         MeetingStartContextProvider provider = org.mockito.Mockito.mock(MeetingStartContextProvider.class);
         MeetingStartContextInvalidationListener listener = new MeetingStartContextInvalidationListener(provider);
 
-        listener.handle(new MeetingEndedEvent(1L));
+        listener.handle(new MeetingEndedEvent(1L, null, null));
 
         verify(provider).invalidate(1L);
     }
