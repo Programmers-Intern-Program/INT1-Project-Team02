@@ -27,7 +27,6 @@ public class WorkLogService {
                 projectRepository.findById(projectId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
 
         if (project.getServer() != null
-                && !guildIds.isEmpty()
                 && !guildIds.contains(project.getServer().getGuildId())) {
             throw new ServiceException("403-1", "권한이 없습니다.");
         }
