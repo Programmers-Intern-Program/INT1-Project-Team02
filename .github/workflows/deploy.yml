@@ -1,28 +1,37 @@
 name: Deploy
 
 on:
-  push:
-    branches: [ main ]
+  release:
+    types: [ published ]
 
 permissions:
   contents: read
 
 jobs:
   update-code:
-    name: 코드 업데이트
+    name: 릴리즈 태그 체크아웃
     runs-on: ubuntu-latest
     steps:
-      - name: EC2 git pull
+      - name: EC2 release tag checkout
         uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_TAG: ${{ github.event.release.tag_name }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DEPLOY_TAG
           script: |
+            set -eu
+            if ! printf '%s' "$DEPLOY_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+              echo "Invalid release tag: $DEPLOY_TAG"
+              exit 1
+            fi
             cd ~/INT1-Project-Team02
-            git fetch origin
-            git checkout main
-            git pull origin main
+            git fetch origin --tags --force
+            DEPLOY_COMMIT=$(git rev-parse --verify "refs/tags/${DEPLOY_TAG}^{commit}")
+            git checkout --force "$DEPLOY_COMMIT"
+            git reset --hard "$DEPLOY_COMMIT"
 
   build:
     name: 빌드 및 헬스체크
@@ -80,12 +89,12 @@ jobs:
         if: ${{ needs.cleanup.result == 'success' }}
         run: |
           curl -s -H "Content-Type: application/json" \
-            -d "{\"embeds\":[{\"title\":\"배포 완료 🚀\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":3066993}]}" \
+            -d "{\"embeds\":[{\"title\":\"배포 완료 🚀\",\"description\":\"**릴리즈**: ${{ github.event.release.tag_name }}\\n**커밋**: ${{ github.sha }}\",\"color\":3066993}]}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
 
       - name: 배포 실패
         if: ${{ contains(needs.*.result, 'failure') }}
         run: |
           curl -s -H "Content-Type: application/json" \
-            -d "{\"embeds\":[{\"title\":\"배포 실패 ❌\",\"description\":\"**브랜치**: main\\n**커밋**: ${{ github.sha }}\",\"color\":15158332}]}" \
+            -d "{\"embeds\":[{\"title\":\"배포 실패 ❌\",\"description\":\"**릴리즈**: ${{ github.event.release.tag_name }}\\n**커밋**: ${{ github.sha }}\",\"color\":15158332}]}" \
             ${{ secrets.DISCORD_WEBHOOK_URL }}
