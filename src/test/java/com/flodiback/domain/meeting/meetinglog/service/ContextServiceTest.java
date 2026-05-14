@@ -264,7 +264,7 @@ class ContextServiceTest {
     void updateContext_savesSummaryAndProcessesEmbedding() {
         Project project = project(1L, "Flodi", "Java");
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();
-        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
@@ -287,7 +287,8 @@ class ContextServiceTest {
                 List.of("decision-1", "decision-2"),
                 List.of(
                         new ActionItemRequest("discord-alice", "Alice", "write API", null),
-                        new ActionItemRequest("Bob", "test API", null)));
+                        new ActionItemRequest("Bob", "test API", null)),
+                null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
@@ -306,12 +307,36 @@ class ContextServiceTest {
     }
 
     @Test
+    void updateContext_updatesExistingWorkLogStatusInProject() {
+        Project project = project(1L, "Flodi", "Java");
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        WorkLog workLog = workLog(project, meeting, 7L);
+        UpdateContextRequest req = new UpdateContextRequest(
+                1L,
+                "summary",
+                null,
+                null,
+                null,
+                List.of(new UpdateContextRequest.WorkLogStatusUpdate(7L, "cancelled")));
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+        given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
+        given(meetingSummaryRepository.save(any(MeetingSummary.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(workLogRepository.findByIdAndProjectId(7L, 1L)).willReturn(Optional.of(workLog));
+
+        contextService.updateContext(1L, req);
+
+        assertThat(workLog.getStatus()).isEqualTo("CANCELLED");
+        verify(workLogRepository).save(workLog);
+    }
+
+    @Test
     void updateContext_throws_whenMeetingProjectDoesNotMatchRequestedProject() {
         Project requestedProject = project(1L, "A", "Java");
         Project meetingProject = project(2L, "B", "Java");
         Meeting meeting =
                 Meeting.builder().project(meetingProject).title("meeting").build();
-        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(requestedProject));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
 
@@ -339,6 +364,18 @@ class ContextServiceTest {
                 MeetingSummary.builder().meeting(meeting).summary(summary).build();
         ReflectionTestUtils.setField(meetingSummary, "id", id);
         return meetingSummary;
+    }
+
+    private WorkLog workLog(Project project, Meeting meeting, Long id) {
+        WorkLog workLog = WorkLog.builder()
+                .project(project)
+                .meeting(meeting)
+                .assigneeName("Alice")
+                .task("write API")
+                .dueDate(null)
+                .build();
+        ReflectionTestUtils.setField(workLog, "id", id);
+        return workLog;
     }
 
     private MeetingStartContext startContext(Long meetingId, Long projectId) {

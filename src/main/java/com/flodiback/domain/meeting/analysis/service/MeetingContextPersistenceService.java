@@ -122,6 +122,15 @@ public class MeetingContextPersistenceService {
                             .build()));
         }
 
+        if (req.worklogUpdates() != null) {
+            req.worklogUpdates().forEach(update -> workLogRepository
+                    .findByIdAndProjectId(update.id(), projectId)
+                    .ifPresent(wl -> {
+                        wl.updateStatus(update.status());
+                        workLogRepository.save(wl);
+                    }));
+        }
+
         decisionRepository.flush();
         workLogRepository.flush();
     }

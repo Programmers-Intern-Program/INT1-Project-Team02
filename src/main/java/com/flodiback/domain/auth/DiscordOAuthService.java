@@ -47,11 +47,18 @@ public class DiscordOAuthService {
 
     /** Discord OAuth 인증 페이지 URL을 생성한다. */
     public String buildAuthorizationUrl() {
+        return buildAuthorizationUrl(null);
+    }
+
+    public String buildAuthorizationUrl(String state) {
+        String stateParam =
+                state == null || state.isBlank() ? "" : "&state=" + URLEncoder.encode(state, StandardCharsets.UTF_8);
         return "https://discord.com/oauth2/authorize"
                 + "?client_id=" + clientId
                 + "&response_type=code"
                 + "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8)
-                + "&scope=identify%20guilds";
+                + "&scope=identify%20guilds"
+                + stateParam;
     }
 
     /** Authorization code를 access token으로 교환한다. */

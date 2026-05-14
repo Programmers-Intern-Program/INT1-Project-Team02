@@ -3,9 +3,11 @@ package com.flodiback.domain.meeting.analysis.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -38,6 +40,8 @@ import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository.SpeakerProjection;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
@@ -57,6 +61,9 @@ class MeetingAnalysisServiceTest {
     private UtteranceRepository utteranceRepository;
 
     @Mock
+    private WorkLogRepository workLogRepository;
+
+    @Mock
     private MeetingContextPersistenceService meetingContextPersistenceService;
 
     @Mock
@@ -70,6 +77,9 @@ class MeetingAnalysisServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(service, "systemPrompt", "test-system-prompt");
+        lenient()
+                .when(workLogRepository.findByProjectIdOrderByCreatedAtDesc(anyLong()))
+                .thenReturn(List.of());
     }
 
     @Test
@@ -343,6 +353,47 @@ class MeetingAnalysisServiceTest {
     }
 
     @Test
+    void analyze_includesExistingWorkLogsAndPassesValidStatusUpdates() throws Exception {
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        WorkLog existing = workLog(meeting, project, 7L, "Alice", "write API");
+        String glmResponse = """
+                {
+                  "summary": "summary",
+                  "unresolvedItems": null,
+                  "worklogs": [],
+                  "worklogUpdates": [
+                    { "id": 7, "status": "done" },
+                    { "id": 999, "status": "DONE" },
+                    { "id": 7, "status": "INVALID" }
+                  ],
+                  "decisions": []
+                }
+                """;
+
+        givenAnalysisInputs(meeting, List.of(), glmResponse);
+        given(workLogRepository.findByProjectIdOrderByCreatedAtDesc(10L)).willReturn(List.of(existing));
+
+        service.analyze(1L);
+
+        ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        assertThat(userPromptCaptor.getValue())
+                .contains("[프로젝트 기존 작업 항목]")
+                .contains("ID:7")
+                .contains("작업:\"write API\"")
+                .contains("상태:TODO");
+
+        ArgumentCaptor<UpdateContextRequest> requestCaptor = ArgumentCaptor.forClass(UpdateContextRequest.class);
+        verify(meetingContextPersistenceService)
+                .saveSummaryRequired(org.mockito.ArgumentMatchers.eq(10L), requestCaptor.capture());
+        assertThat(requestCaptor.getValue().worklogUpdates())
+                .extracting(
+                        UpdateContextRequest.WorkLogStatusUpdate::id, UpdateContextRequest.WorkLogStatusUpdate::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(7L, "DONE"));
+    }
+
+    @Test
     void analyze_throwsWhenGlmResponseCannotBeParsed() throws Exception {
         Project project = mockProject(10L);
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();
@@ -403,6 +454,18 @@ class MeetingAnalysisServiceTest {
                 .build();
         ReflectionTestUtils.setField(utterance, "id", id);
         return utterance;
+    }
+
+    private WorkLog workLog(Meeting meeting, Project project, Long id, String assigneeName, String task) {
+        WorkLog workLog = WorkLog.builder()
+                .meeting(meeting)
+                .project(project)
+                .assigneeName(assigneeName)
+                .task(task)
+                .dueDate(null)
+                .build();
+        ReflectionTestUtils.setField(workLog, "id", id);
+        return workLog;
     }
 
     private List<SpeakerProjection> speakersFrom(List<Utterance> utterances) {

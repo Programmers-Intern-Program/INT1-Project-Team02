@@ -2,6 +2,11 @@
 
 이 문서는 봇-백엔드 연동에 중요한 내부 API 계약을 기록합니다.
 
+## 시간대 기준
+- 서버의 기본 시간대, Jackson 직렬화, Hibernate JDBC 시간대는 UTC로 고정합니다.
+- `Z`가 붙은 timestamp는 UTC instant입니다. 프론트엔드는 화면 표시 시 사용자 로컬 시간대 또는 KST로 변환해 렌더링합니다.
+- zone 정보가 없는 `LocalDateTime` 필드는 UTC 기준 wall-clock 값으로 해석합니다.
+
 ## `POST /internal/v1/speech`
 Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
 
@@ -128,6 +133,34 @@ Query:
 
 ## `PUT /internal/v1/projects/{id}/context`
 프로젝트 컨텍스트를 갱신합니다.
+
+요청 본문:
+```json
+{
+  "meetingId": 1,
+  "summary": "회의 요약",
+  "unresolvedItems": null,
+  "decisions": ["인증 방식은 JWT로 한다."],
+  "actionItems": [
+    {
+      "assigneeDiscordId": "123456789",
+      "assigneeName": "김철수",
+      "task": "로그인 API 작성",
+      "dueDate": "2026-05-10"
+    }
+  ],
+  "worklogUpdates": [
+    {
+      "id": 7,
+      "status": "DONE"
+    }
+  ]
+}
+```
+
+- `meetingId`, `summary`는 필수입니다.
+- `worklogUpdates[].id`는 요청 프로젝트에 속한 기존 작업 로그 ID여야 합니다. 다른 프로젝트 ID이거나 존재하지 않으면 무시됩니다.
+- `worklogUpdates[].status`: `TODO`, `IN_PROGRESS`, `DONE`, `CANCELLED`
 
 ## `POST /internal/v1/discord/connect`
 Discord 서버와 프로젝트를 연결합니다.

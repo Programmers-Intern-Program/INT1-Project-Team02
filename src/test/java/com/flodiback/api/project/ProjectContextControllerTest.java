@@ -46,7 +46,8 @@ class ProjectContextControllerTest {
 
     @Test
     void updateContext_정상_요청_200() throws Exception {
-        String body = objectMapper.writeValueAsString(new UpdateContextRequest(1L, "회의 요약입니다.", null, null, null));
+        String body =
+                objectMapper.writeValueAsString(new UpdateContextRequest(1L, "회의 요약입니다.", null, null, null, null));
 
         mockMvc.perform(put("/internal/v1/projects/1/context")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -57,7 +58,7 @@ class ProjectContextControllerTest {
 
     @Test
     void updateContext_meetingId_null이면_400() throws Exception {
-        String body = objectMapper.writeValueAsString(new UpdateContextRequest(null, "요약", null, null, null));
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(null, "요약", null, null, null, null));
 
         mockMvc.perform(put("/internal/v1/projects/1/context")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -67,7 +68,7 @@ class ProjectContextControllerTest {
 
     @Test
     void updateContext_summary_blank이면_400() throws Exception {
-        String body = objectMapper.writeValueAsString(new UpdateContextRequest(1L, "  ", null, null, null));
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(1L, "  ", null, null, null, null));
 
         mockMvc.perform(put("/internal/v1/projects/1/context")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -79,7 +80,7 @@ class ProjectContextControllerTest {
     void updateContext_actionItem_assigneeName_blank이면_400() throws Exception {
         ActionItemRequest badItem = new ActionItemRequest("", "태스크 내용", null);
         String body = objectMapper.writeValueAsString(
-                new UpdateContextRequest(1L, "요약", null, null, java.util.List.of(badItem)));
+                new UpdateContextRequest(1L, "요약", null, null, java.util.List.of(badItem), null));
 
         mockMvc.perform(put("/internal/v1/projects/1/context")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -91,7 +92,39 @@ class ProjectContextControllerTest {
     void updateContext_actionItem_task_blank이면_400() throws Exception {
         ActionItemRequest badItem = new ActionItemRequest("담당자", "", null);
         String body = objectMapper.writeValueAsString(
-                new UpdateContextRequest(1L, "요약", null, null, java.util.List.of(badItem)));
+                new UpdateContextRequest(1L, "요약", null, null, java.util.List.of(badItem), null));
+
+        mockMvc.perform(put("/internal/v1/projects/1/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateContext_worklogUpdate_id_null이면_400() throws Exception {
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(
+                1L,
+                "요약",
+                null,
+                null,
+                null,
+                java.util.List.of(new UpdateContextRequest.WorkLogStatusUpdate(null, "DONE"))));
+
+        mockMvc.perform(put("/internal/v1/projects/1/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateContext_worklogUpdate_status_invalid이면_400() throws Exception {
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(
+                1L,
+                "요약",
+                null,
+                null,
+                null,
+                java.util.List.of(new UpdateContextRequest.WorkLogStatusUpdate(1L, "BLOCKED"))));
 
         mockMvc.perform(put("/internal/v1/projects/1/context")
                         .contentType(MediaType.APPLICATION_JSON)
