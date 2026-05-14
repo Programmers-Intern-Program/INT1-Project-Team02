@@ -13,8 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RollingSummaryService {
 
-    static final int TOKEN_THRESHOLD = 2200;
-    static final int KEEP_TURNS = 16;
+    static final int TOKEN_THRESHOLD = 1100;
+    static final int KEEP_TURNS = 8;
 
     private static final String SYSTEM_PROMPT = """
             당신은 회의 내용을 압축하는 AI 요약기입니다.
