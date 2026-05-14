@@ -67,4 +67,10 @@ public class WorkLog {
         this.dueDate = dueDate;
         this.status = "TODO";
     }
+
+    public void updateStatus(String newStatus) {
+        if (newStatus != null && !newStatus.isBlank()) {
+            this.status = newStatus.toUpperCase();
+        }
+    }
 }

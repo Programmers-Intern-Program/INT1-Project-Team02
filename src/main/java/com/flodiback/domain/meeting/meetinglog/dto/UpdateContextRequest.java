@@ -11,4 +11,8 @@ public record UpdateContextRequest(
         @NotBlank String summary,
         String unresolvedItems,
         List<String> decisions,
-        @Valid List<ActionItemRequest> actionItems) {}
+        @Valid List<ActionItemRequest> actionItems,
+        List<WorkLogStatusUpdate> worklogUpdates) {
+
+    public record WorkLogStatusUpdate(Long id, String status) {}
+}

@@ -264,7 +264,7 @@ class ContextServiceTest {
     void updateContext_savesSummaryAndProcessesEmbedding() {
         Project project = project(1L, "Flodi", "Java");
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();
-        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
@@ -287,7 +287,8 @@ class ContextServiceTest {
                 List.of("decision-1", "decision-2"),
                 List.of(
                         new ActionItemRequest("discord-alice", "Alice", "write API", null),
-                        new ActionItemRequest("Bob", "test API", null)));
+                        new ActionItemRequest("Bob", "test API", null)),
+                null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(project));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(meetingSummaryRepository.save(any(MeetingSummary.class)))
@@ -311,7 +312,7 @@ class ContextServiceTest {
         Project meetingProject = project(2L, "B", "Java");
         Meeting meeting =
                 Meeting.builder().project(meetingProject).title("meeting").build();
-        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null);
+        UpdateContextRequest req = new UpdateContextRequest(1L, "summary", null, null, null, null);
         given(projectRepository.findById(1L)).willReturn(Optional.of(requestedProject));
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
 

@@ -35,6 +35,8 @@ import com.flodiback.domain.meeting.meetinglog.entity.Utterance;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository.SpeakerProjection;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
@@ -64,6 +66,7 @@ public class MeetingAnalysisService {
     private final MeetingRepository meetingRepository;
     private final ContextCacheRepository contextCacheRepository;
     private final UtteranceRepository utteranceRepository;
+    private final WorkLogRepository workLogRepository;
     private final MeetingContextPersistenceService meetingContextPersistenceService;
     private final GlmClient glmClient;
     private final ObjectMapper objectMapper;
@@ -88,11 +91,14 @@ public class MeetingAnalysisService {
         }
         // 회의 종료 분석 - 발화자 key map 생성
         SpeakerDirectory speakerDirectory = buildSpeakerDirectory(meeting);
+        // 프로젝트의 기존 작업 로그 조회 (상태 변경 감지용)
+        List<WorkLog> existingWorkLogs = workLogRepository.findByProjectIdOrderByCreatedAtDesc(project.getId());
         // GLM prompt context 생성
-        String context = buildContext(meeting, speakerDirectory);
+        String context = buildContext(meeting, speakerDirectory, existingWorkLogs);
         // GLM 응답 - GLM은 이름 대신 speaker key 반환
         AnalysisResult result = callGlm(context);
-        UpdateContextRequest request = toUpdateContextRequest(meeting.getId(), result, speakerDirectory);
+        UpdateContextRequest request =
+                toUpdateContextRequest(meeting.getId(), result, speakerDirectory, existingWorkLogs);
 
         /*
          * saveSummaryRequired()
@@ -111,7 +117,7 @@ public class MeetingAnalysisService {
     }
 
     private UpdateContextRequest toUpdateContextRequest(
-            Long meetingId, AnalysisResult result, SpeakerDirectory speakerDirectory) {
+            Long meetingId, AnalysisResult result, SpeakerDirectory speakerDirectory, List<WorkLog> existingWorkLogs) {
         String summary = normalizeRequiredSummary(result.summary());
         List<String> decisions = result.decisions() == null
                 ? null
@@ -128,8 +134,25 @@ public class MeetingAnalysisService {
                         .filter(Objects::nonNull)
                         .toList();
 
+        // AI가 반환한 worklogUpdates를 기존 work log ID와 대조하여 유효한 것만 통과시킴
+        Map<Long, WorkLog> existingById =
+                existingWorkLogs.stream().collect(java.util.stream.Collectors.toMap(WorkLog::getId, wl -> wl));
+        List<UpdateContextRequest.WorkLogStatusUpdate> worklogUpdates = result.worklogUpdates() == null
+                ? null
+                : result.worklogUpdates().stream()
+                        .filter(Objects::nonNull)
+                        .filter(u -> u.id() != null && existingById.containsKey(u.id()))
+                        .filter(u -> u.status() != null && !u.status().isBlank())
+                        .map(u -> new UpdateContextRequest.WorkLogStatusUpdate(u.id(), u.status()))
+                        .toList();
+
         return new UpdateContextRequest(
-                meetingId, summary, normalizeOptionalText(result.unresolvedItems()), decisions, actionItems);
+                meetingId,
+                summary,
+                normalizeOptionalText(result.unresolvedItems()),
+                decisions,
+                actionItems,
+                worklogUpdates);
     }
 
     private ActionItemRequest toActionItemRequest(WorkLogItem item, SpeakerDirectory speakerDirectory) {
@@ -212,7 +235,7 @@ public class MeetingAnalysisService {
      * rolling summary에는 speaker key가 없다.
      * 그래서 prompt에서도 summary에서만 추론한 담당자는 assigneeSpeakerKey=null로 반환
      */
-    private String buildContext(Meeting meeting, SpeakerDirectory speakerDirectory) {
+    private String buildContext(Meeting meeting, SpeakerDirectory speakerDirectory, List<WorkLog> existingWorkLogs) {
         ContextCache latestCache = contextCacheRepository
                 .findTopByMeetingOrderByVersionDesc(meeting)
                 .orElse(null);
@@ -222,6 +245,16 @@ public class MeetingAnalysisService {
                         meeting, latestCache.getCompressedUntilUtteranceId());
 
         StringBuilder sb = new StringBuilder();
+
+        // 기존 작업 로그를 컨텍스트에 포함 — AI가 상태 변경 여부를 판단하는 데 사용
+        if (!existingWorkLogs.isEmpty()) {
+            sb.append("[프로젝트 기존 작업 항목]\n");
+            existingWorkLogs.forEach(wl -> sb.append(String.format(
+                    "- ID:%d, 담당:%s, 작업:\"%s\", 상태:%s%n",
+                    wl.getId(), wl.getAssigneeName(), wl.getTask(), wl.getStatus())));
+            sb.append("\n");
+        }
+
         if (latestCache != null) {
             sb.append("[현재 회의 rolling summary]\n");
             sb.append(latestCache.getCompressedText()).append("\n\n");
