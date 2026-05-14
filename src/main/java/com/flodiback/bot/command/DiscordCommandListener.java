@@ -879,9 +879,12 @@ public class DiscordCommandListener extends ListenerAdapter {
                 return;
             }
 
-            // 채널에 프로젝트 연결
+            // 채널에 프로젝트 연결 (channelName을 쿼리 파라미터로 전달)
+            String channelName =
+                    java.net.URLEncoder.encode(event.getChannel().getName(), java.nio.charset.StandardCharsets.UTF_8);
             HttpRequest.Builder connectReq = HttpRequest.newBuilder()
-                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + projectId + "/channel/" + channelId))
+                    .uri(URI.create(internalBaseUrl + "/internal/v1/projects/" + projectId + "/channel/" + channelId
+                            + "?channelName=" + channelName))
                     .PUT(HttpRequest.BodyPublishers.noBody());
             attachInternalApiKey(connectReq);
             attachRequesterHeader(connectReq, event.getAuthor().getId());

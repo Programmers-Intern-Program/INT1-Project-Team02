@@ -93,10 +93,14 @@ public class MeetingService {
     }
 
     @Transactional(readOnly = true)
-    public List<MeetingDetailResponse> getByProjectId(Long projectId, String guildId) {
+    public List<MeetingDetailResponse> getByProjectId(Long projectId, List<String> guildIds) {
         Project project =
                 projectRepository.findById(projectId).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
-        checkReadPermission(project, guildId);
+        if (project.getServer() != null
+                && !guildIds.isEmpty()
+                && !guildIds.contains(project.getServer().getGuildId())) {
+            throw new ServiceException("403-1", "권한이 없습니다.");
+        }
         return meetingRepository.findByProjectId(projectId).stream()
                 .map(this::toDetailResponse)
                 .toList();

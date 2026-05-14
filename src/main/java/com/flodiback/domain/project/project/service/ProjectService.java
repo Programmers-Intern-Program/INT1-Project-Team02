@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,7 @@ import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
 import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.project.project.event.ProjectCreatedEvent;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
 import com.flodiback.domain.server.server.repository.DiscordServerRepository;
@@ -30,6 +32,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final DiscordServerRepository discordServerRepository;
     private final MeetingRepository meetingRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ProjectResponse create(CreateProjectRequest req) {
         if (req.channelId() != null) {
@@ -61,6 +64,8 @@ public class ProjectService {
                 .techStack(req.techStack())
                 .build();
         projectRepository.save(project);
+        eventPublisher.publishEvent(
+                new ProjectCreatedEvent(project.getId(), server != null ? server.getGuildId() : null));
 
         return toResponse(project, null);
     }
@@ -131,11 +136,11 @@ public class ProjectService {
         return toResponseWithActiveMeeting(project);
     }
 
-    public void connectChannel(Long id, String channelId, String requesterId) {
+    public void connectChannel(Long id, String channelId, String channelName, String requesterId) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         checkWritePermission(project, requesterId);
-        project.connectChannel(channelId);
+        project.connectChannel(channelId, channelName);
     }
 
     public void disconnectChannel(Long id, String requesterId) {
@@ -186,11 +191,13 @@ public class ProjectService {
         return new ProjectResponse(
                 project.getId(),
                 project.getServer() != null ? project.getServer().getId() : null,
+                project.getServer() != null ? project.getServer().getGuildName() : null,
                 project.getName(),
                 project.getDescription(),
                 project.getTechStack(),
                 project.getCreatedAt(),
                 project.getChannelId(),
+                project.getChannelName(),
                 activeMeetingId);
     }
 }
