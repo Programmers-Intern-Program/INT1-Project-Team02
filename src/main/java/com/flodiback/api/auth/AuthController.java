@@ -29,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 public class AuthController {
 
     static final String JWT_COOKIE = "jwt";
+    private static final String DEFAULT_LOGIN_REDIRECT = "/projects";
 
     private final DiscordOAuthService discordOAuthService;
     private final JwtProvider jwtProvider;
@@ -38,15 +39,17 @@ public class AuthController {
 
     /** Discord OAuth 인증 페이지로 리다이렉트 */
     @GetMapping("/discord")
-    public ResponseEntity<Void> redirectToDiscord() {
+    public ResponseEntity<Void> redirectToDiscord(@RequestParam(required = false) String redirect) {
+        String safeRedirect = safeRedirectPathOrDefault(redirect);
         return ResponseEntity.status(302)
-                .location(URI.create(discordOAuthService.buildAuthorizationUrl()))
+                .location(URI.create(discordOAuthService.buildAuthorizationUrl(safeRedirect)))
                 .build();
     }
 
     /** Discord 콜백: code → JWT 발급 → httpOnly 쿠키 설정 → 프론트로 리다이렉트 */
     @GetMapping("/discord/callback")
-    public ResponseEntity<Void> handleCallback(@RequestParam String code) {
+    public ResponseEntity<Void> handleCallback(
+            @RequestParam String code, @RequestParam(required = false) String state) {
         String accessToken = discordOAuthService.exchangeToken(code);
         DiscordUser user = discordOAuthService.fetchUser(accessToken);
         List<String> userGuildIds = discordOAuthService.fetchGuildIds(accessToken);
@@ -64,7 +67,7 @@ public class AuthController {
 
         return ResponseEntity.status(302)
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .location(URI.create(frontendOrigin + "/projects"))
+                .location(URI.create(frontendOrigin + safeRedirectPathOrDefault(state)))
                 .build();
     }
 
@@ -100,6 +103,26 @@ public class AuthController {
                 .path("/")
                 .maxAge(maxAge)
                 .build();
+    }
+
+    static String safeRedirectPathOrDefault(String redirect) {
+        if (redirect == null || redirect.isBlank()) {
+            return DEFAULT_LOGIN_REDIRECT;
+        }
+        if (redirect.length() > 2048
+                || !redirect.startsWith("/")
+                || redirect.startsWith("//")
+                || redirect.regionMatches(true, 0, "http://", 0, "http://".length())
+                || redirect.regionMatches(true, 0, "https://", 0, "https://".length())) {
+            return DEFAULT_LOGIN_REDIRECT;
+        }
+        for (int i = 0; i < redirect.length(); i++) {
+            char ch = redirect.charAt(i);
+            if (ch < 0x20 || ch == 0x7f) {
+                return DEFAULT_LOGIN_REDIRECT;
+            }
+        }
+        return redirect;
     }
 
     public record MeResponse(String userId, List<String> guildIds) {}
