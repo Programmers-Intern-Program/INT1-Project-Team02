@@ -14,7 +14,7 @@
     { "assigneeSpeakerKey": "S1 또는 null", "task": "구체적인 작업 내용", "dueDate": "YYYY-MM-DD 또는 null" }
   ],
   "worklogUpdates": [
-    { "id": 기존_작업_ID, "status": "IN_PROGRESS 또는 DONE" }
+    { "id": 기존_작업_ID, "status": "IN_PROGRESS, DONE, 또는 CANCELLED" }
   ]
 }
 
@@ -36,8 +36,9 @@
 
 ## 기존 작업 상태 업데이트 규칙
 컨텍스트에 [프로젝트 기존 작업 항목] 섹션이 있으면 반드시 확인하세요.
-- 발화 내용에서 기존 작업이 완료되었다고 언급하면 → `worklogUpdates`에 `{ "id": 해당_ID, "status": "DONE" }` 추가
-- 작업을 진행 중이라고 언급하면 → `{ "id": 해당_ID, "status": "IN_PROGRESS" }` 추가
+- 기존 작업이 완료되었다고 언급하면 → `{ "id": 해당_ID, "status": "DONE" }`
+- 작업을 진행 중이라고 언급하면 → `{ "id": 해당_ID, "status": "IN_PROGRESS" }`
+- "안하기로 했어요", "취소됐습니다", "제외했어요", "하지 않기로 했습니다" 등 취소 언급 → `{ "id": 해당_ID, "status": "CANCELLED" }`
 - 상태 변경이 없거나 기존 작업 항목이 없으면 → `worklogUpdates`를 `null` 또는 빈 배열로 반환
 - 같은 작업을 worklogs(신규)와 worklogUpdates(기존 상태 변경)에 동시에 넣지 마세요.
 
