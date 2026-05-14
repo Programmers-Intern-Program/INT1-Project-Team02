@@ -88,7 +88,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isNull();
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isNull();
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(13L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(15L);
         assertThat(candidate.userPrompt()).contains("content-1").doesNotContain("content-31");
         assertThat(candidate.userPrompt())
                 .contains("[출력]")
@@ -122,7 +122,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isEqualTo(3);
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isEqualTo(5L);
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(18L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(20L);
         assertThat(candidate.userPrompt()).contains("previous summary");
         assertThat(candidate.nextVersion()).isEqualTo(4);
     }
@@ -146,10 +146,10 @@ class RollingSummaryPersistenceServiceTest {
         RollingSummaryPersistenceService.CompressionCandidate candidate =
                 service.prepareCompression(1L).orElseThrow();
 
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(15L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(17L);
         assertThat(candidate.userPrompt())
                 .contains("content-3")
-                .contains("content-15")
+                .contains("content-17")
                 .doesNotContain("content-33");
     }
 

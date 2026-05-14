@@ -13,8 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RollingSummaryService {
 
-    static final int TOKEN_THRESHOLD = 2600;
-    static final int KEEP_TURNS = 18;
+    static final int TOKEN_THRESHOLD = 2200;
+    static final int KEEP_TURNS = 16;
 
     private static final String SYSTEM_PROMPT = """
             당신은 회의 내용을 압축하는 AI 요약기입니다.
@@ -57,5 +57,20 @@ public class RollingSummaryService {
 
     public long calculateUncompressedTokenCount(Long meetingId) {
         return rollingSummaryPersistenceService.calculateUncompressedTokenCount(meetingId);
+    }
+
+    public RollingSummaryProgress getProgress(Long meetingId) {
+        long uncompressedTokens = calculateUncompressedTokenCount(meetingId);
+        int progressPercent = (int) Math.min(100L, uncompressedTokens * 100L / TOKEN_THRESHOLD);
+        int remainingPercent = 100 - progressPercent;
+        long remainingTokens = Math.max(0L, TOKEN_THRESHOLD - uncompressedTokens);
+        return new RollingSummaryProgress(
+                meetingId,
+                uncompressedTokens,
+                TOKEN_THRESHOLD,
+                remainingTokens,
+                progressPercent,
+                remainingPercent,
+                uncompressedTokens >= TOKEN_THRESHOLD);
     }
 }
