@@ -123,8 +123,9 @@ public class MeetingContextPersistenceService {
         }
 
         if (req.worklogUpdates() != null) {
-            req.worklogUpdates()
-                    .forEach(update -> workLogRepository.findById(update.id()).ifPresent(wl -> {
+            req.worklogUpdates().forEach(update -> workLogRepository
+                    .findByIdAndProjectId(update.id(), projectId)
+                    .ifPresent(wl -> {
                         wl.updateStatus(update.status());
                         workLogRepository.save(wl);
                     }));

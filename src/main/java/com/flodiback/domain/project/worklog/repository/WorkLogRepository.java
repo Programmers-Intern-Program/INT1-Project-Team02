@@ -1,12 +1,15 @@
 package com.flodiback.domain.project.worklog.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.flodiback.domain.project.worklog.entity.WorkLog;
 
 public interface WorkLogRepository extends JpaRepository<WorkLog, Long> {
+
+    Optional<WorkLog> findByIdAndProjectId(Long id, Long projectId);
 
     List<WorkLog> findTop5ByProjectIdAndStatusOrderByIdDesc(Long projectId, String status);
 

@@ -101,6 +101,38 @@ class ProjectContextControllerTest {
     }
 
     @Test
+    void updateContext_worklogUpdate_id_null이면_400() throws Exception {
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(
+                1L,
+                "요약",
+                null,
+                null,
+                null,
+                java.util.List.of(new UpdateContextRequest.WorkLogStatusUpdate(null, "DONE"))));
+
+        mockMvc.perform(put("/internal/v1/projects/1/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateContext_worklogUpdate_status_invalid이면_400() throws Exception {
+        String body = objectMapper.writeValueAsString(new UpdateContextRequest(
+                1L,
+                "요약",
+                null,
+                null,
+                null,
+                java.util.List.of(new UpdateContextRequest.WorkLogStatusUpdate(1L, "BLOCKED"))));
+
+        mockMvc.perform(put("/internal/v1/projects/1/context")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void updateContext_requestBody_없으면_400() throws Exception {
         mockMvc.perform(put("/internal/v1/projects/1/context").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest());

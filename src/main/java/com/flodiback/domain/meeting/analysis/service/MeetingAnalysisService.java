@@ -143,7 +143,8 @@ public class MeetingAnalysisService {
                         .filter(Objects::nonNull)
                         .filter(u -> u.id() != null && existingById.containsKey(u.id()))
                         .filter(u -> u.status() != null && !u.status().isBlank())
-                        .map(u -> new UpdateContextRequest.WorkLogStatusUpdate(u.id(), u.status()))
+                        .map(u -> toWorkLogStatusUpdate(u.id(), u.status()))
+                        .filter(Objects::nonNull)
                         .toList();
 
         return new UpdateContextRequest(
@@ -153,6 +154,14 @@ public class MeetingAnalysisService {
                 decisions,
                 actionItems,
                 worklogUpdates);
+    }
+
+    private UpdateContextRequest.WorkLogStatusUpdate toWorkLogStatusUpdate(Long id, String status) {
+        try {
+            return new UpdateContextRequest.WorkLogStatusUpdate(id, WorkLog.normalizeStatus(status));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private ActionItemRequest toActionItemRequest(WorkLogItem item, SpeakerDirectory speakerDirectory) {

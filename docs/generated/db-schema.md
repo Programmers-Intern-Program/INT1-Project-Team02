@@ -86,4 +86,5 @@
 - `assignee_discord_id` VARCHAR(50) NULL
 - `task` TEXT NOT NULL
 - `due_date` DATE NULL
+- `status` VARCHAR(20) NOT NULL — `TODO`, `IN_PROGRESS`, `DONE`, `CANCELLED`
 - `created_at` TIMESTAMP NOT NULL

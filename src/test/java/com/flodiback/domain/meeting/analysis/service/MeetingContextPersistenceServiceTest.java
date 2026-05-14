@@ -152,6 +152,24 @@ class MeetingContextPersistenceServiceTest {
     }
 
     @Test
+    void saveDerivedItemsBestEffort_updatesExistingWorkLogStatusInProject() {
+        Project project = project(1L);
+        Meeting meeting = meeting(project);
+        WorkLog workLog = workLog(project, meeting, 7L);
+        UpdateContextRequest req = new UpdateContextRequest(
+                10L, "summary", null, null, null, List.of(new UpdateContextRequest.WorkLogStatusUpdate(7L, "done")));
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+        given(meetingRepository.findById(10L)).willReturn(Optional.of(meeting));
+        given(workLogRepository.findByIdAndProjectId(7L, 1L)).willReturn(Optional.of(workLog));
+        stubNewTransaction();
+
+        service.saveDerivedItemsBestEffort(1L, req);
+
+        assertThat(workLog.getStatus()).isEqualTo("DONE");
+        verify(workLogRepository).save(workLog);
+    }
+
+    @Test
     void saveDerivedItemsBestEffort_swallowsWorkLogFailure() {
         Project project = project(1L);
         Meeting meeting = meeting(project);
@@ -210,6 +228,18 @@ class MeetingContextPersistenceServiceTest {
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();
         ReflectionTestUtils.setField(meeting, "id", 10L);
         return meeting;
+    }
+
+    private WorkLog workLog(Project project, Meeting meeting, Long id) {
+        WorkLog workLog = WorkLog.builder()
+                .project(project)
+                .meeting(meeting)
+                .assigneeName("Alice")
+                .task("write API")
+                .dueDate(null)
+                .build();
+        ReflectionTestUtils.setField(workLog, "id", id);
+        return workLog;
     }
 
     private void stubNewTransaction() {

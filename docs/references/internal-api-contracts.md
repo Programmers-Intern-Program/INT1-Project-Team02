@@ -129,6 +129,34 @@ Query:
 ## `PUT /internal/v1/projects/{id}/context`
 프로젝트 컨텍스트를 갱신합니다.
 
+요청 본문:
+```json
+{
+  "meetingId": 1,
+  "summary": "회의 요약",
+  "unresolvedItems": null,
+  "decisions": ["인증 방식은 JWT로 한다."],
+  "actionItems": [
+    {
+      "assigneeDiscordId": "123456789",
+      "assigneeName": "김철수",
+      "task": "로그인 API 작성",
+      "dueDate": "2026-05-10"
+    }
+  ],
+  "worklogUpdates": [
+    {
+      "id": 7,
+      "status": "DONE"
+    }
+  ]
+}
+```
+
+- `meetingId`, `summary`는 필수입니다.
+- `worklogUpdates[].id`는 요청 프로젝트에 속한 기존 작업 로그 ID여야 합니다. 다른 프로젝트 ID이거나 존재하지 않으면 무시됩니다.
+- `worklogUpdates[].status`: `TODO`, `IN_PROGRESS`, `DONE`, `CANCELLED`
+
 ## `POST /internal/v1/discord/connect`
 Discord 서버와 프로젝트를 연결합니다.
 

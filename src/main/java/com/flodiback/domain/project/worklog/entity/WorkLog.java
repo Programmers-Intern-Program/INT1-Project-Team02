@@ -2,6 +2,8 @@ package com.flodiback.domain.project.worklog.entity;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Locale;
+import java.util.Set;
 
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -19,6 +21,8 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class WorkLog {
+
+    private static final Set<String> SUPPORTED_STATUSES = Set.of("TODO", "IN_PROGRESS", "DONE", "CANCELLED");
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -69,8 +73,20 @@ public class WorkLog {
     }
 
     public void updateStatus(String newStatus) {
-        if (newStatus != null && !newStatus.isBlank()) {
-            this.status = newStatus.toUpperCase();
+        String normalized = normalizeStatus(newStatus);
+        if (normalized != null) {
+            this.status = normalized;
         }
+    }
+
+    public static String normalizeStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        String normalized = status.strip().toUpperCase(Locale.ROOT);
+        if (!SUPPORTED_STATUSES.contains(normalized)) {
+            throw new IllegalArgumentException("지원하지 않는 작업 로그 상태입니다: " + status);
+        }
+        return normalized;
     }
 }
