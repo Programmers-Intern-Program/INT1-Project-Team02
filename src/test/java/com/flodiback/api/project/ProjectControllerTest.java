@@ -99,7 +99,7 @@ class ProjectControllerTest {
 
     @Test
     void disconnectChannel_채널_연결을_해제한다() throws Exception {
-        project.connectChannel("channel-123");
+        project.connectChannel("channel-123", "테스트-채널");
         projectRepository.save(project);
 
         mockMvc.perform(delete("/internal/v1/projects/{id}/channel", project.getId())
@@ -113,7 +113,7 @@ class ProjectControllerTest {
 
     @Test
     void getByChannelId_채널에_연결된_프로젝트를_조회한다() throws Exception {
-        project.connectChannel("channel-123");
+        project.connectChannel("channel-123", "테스트-채널");
         projectRepository.save(project);
 
         mockMvc.perform(get("/internal/v1/projects/channel/{channelId}", "channel-123")

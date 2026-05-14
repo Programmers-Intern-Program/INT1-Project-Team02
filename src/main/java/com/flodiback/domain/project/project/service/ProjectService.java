@@ -131,11 +131,11 @@ public class ProjectService {
         return toResponseWithActiveMeeting(project);
     }
 
-    public void connectChannel(Long id, String channelId, String requesterId) {
+    public void connectChannel(Long id, String channelId, String channelName, String requesterId) {
         Project project =
                 projectRepository.findById(id).orElseThrow(() -> new NoSuchElementException("존재하지 않는 프로젝트입니다."));
         checkWritePermission(project, requesterId);
-        project.connectChannel(channelId);
+        project.connectChannel(channelId, channelName);
     }
 
     public void disconnectChannel(Long id, String requesterId) {
@@ -186,11 +186,13 @@ public class ProjectService {
         return new ProjectResponse(
                 project.getId(),
                 project.getServer() != null ? project.getServer().getId() : null,
+                project.getServer() != null ? project.getServer().getGuildName() : null,
                 project.getName(),
                 project.getDescription(),
                 project.getTechStack(),
                 project.getCreatedAt(),
                 project.getChannelId(),
+                project.getChannelName(),
                 activeMeetingId);
     }
 }
