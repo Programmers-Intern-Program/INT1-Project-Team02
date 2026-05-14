@@ -196,6 +196,15 @@ public class ContextService {
                             .dueDate(item.dueDate())
                             .build()));
         }
+
+        if (req.worklogUpdates() != null) {
+            req.worklogUpdates().forEach(update -> workLogRepository
+                    .findByIdAndProjectId(update.id(), projectId)
+                    .ifPresent(wl -> {
+                        wl.updateStatus(update.status());
+                        workLogRepository.save(wl);
+                    }));
+        }
     }
 
     private QuestionContext resolveQuestionContext(

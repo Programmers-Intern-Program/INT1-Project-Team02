@@ -13,6 +13,7 @@ x-app-common: &app-common
     - path: .env.prod
       required: false
   environment:
+    TZ: UTC
     # 컨테이너 네트워크 안에서는 서비스명(db, redis)으로 접근한다.
     SPRING_PROFILES_ACTIVE: prod
     DB_HOST: db
@@ -109,6 +110,7 @@ services:
       - path: .env.prod
         required: false
     environment:
+      TZ: UTC
       # 봇은 nginx를 통해 현재 active API 슬롯을 호출한다.
       INTERNAL_API_BASE_URL: http://nginx:80
       DB_HOST: db

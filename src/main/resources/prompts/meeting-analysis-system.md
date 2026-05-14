@@ -12,6 +12,9 @@
   ],
   "worklogs": [
     { "assigneeSpeakerKey": "S1 또는 null", "task": "구체적인 작업 내용", "dueDate": "YYYY-MM-DD 또는 null" }
+  ],
+  "worklogUpdates": [
+    { "id": 기존_작업_ID, "status": "IN_PROGRESS, DONE, 또는 CANCELLED" }
   ]
 }
 
@@ -30,6 +33,14 @@
 - "이번 주 금요일", "다음 주 월요일" 등 상대적 표현: 오늘 날짜 기준으로 계산하여 "YYYY-MM-DD"로 변환
 - 날짜 언급이 전혀 없는 경우에만 null
 - 반드시 "YYYY-MM-DD" 형식 또는 null만 반환, 자연어 문자열 금지
+
+## 기존 작업 상태 업데이트 규칙
+컨텍스트에 [프로젝트 기존 작업 항목] 섹션이 있으면 반드시 확인하세요.
+- 기존 작업이 완료되었다고 언급하면 → `{ "id": 해당_ID, "status": "DONE" }`
+- 작업을 진행 중이라고 언급하면 → `{ "id": 해당_ID, "status": "IN_PROGRESS" }`
+- "안하기로 했어요", "취소됐습니다", "제외했어요", "하지 않기로 했습니다" 등 취소 언급 → `{ "id": 해당_ID, "status": "CANCELLED" }`
+- 상태 변경이 없거나 기존 작업 항목이 없으면 → `worklogUpdates`를 `null` 또는 빈 배열로 반환
+- 같은 작업을 worklogs(신규)와 worklogUpdates(기존 상태 변경)에 동시에 넣지 마세요.
 
 ## 결정 사항 vs 업무 분배 구분
 - decisions: 팀 전체에 영향을 주는 확정된 결정 (예: 기능 제외, 일정 확정)
