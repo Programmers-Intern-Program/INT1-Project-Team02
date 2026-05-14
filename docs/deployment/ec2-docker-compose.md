@@ -32,7 +32,7 @@ newgrp docker
 ```bash
 git clone https://github.com/Programmers-Intern-Program/INT1-Project-Team02.git
 cd INT1-Project-Team02
-git checkout dev
+git checkout main
 
 vi .env.prod
 
@@ -69,12 +69,27 @@ The API is published on port `8000` by default.
 curl http://localhost:8000/actuator/health
 ```
 
+## Release Deploy Flow
+
+운영 배포는 `main`에 직접 push될 때 실행하지 않는다. Release Please가 `main` 기준으로 릴리즈 PR을 만들고, 해당 PR이 `main`에 머지되어 GitHub Release가 publish될 때 배포가 실행된다.
+
+```text
+feature PR -> dev
+dev 검증
+dev -> main
+Release Please -> chore(main): release x.y.z
+chore(main) -> main
+GitHub Release published
+Deploy workflow -> EC2에서 해당 release tag checkout 후 blue-green 배포
+```
+
+EC2의 배포 workflow는 릴리즈 태그를 checkout해서 배포하므로, 배포된 코드와 GitHub Release 버전이 일치한다.
+
 ## Zero-Downtime API Deploy
 
-업데이트 배포는 `docker compose up -d --build`를 직접 실행하지 않고 blue-green 스크립트로 수행한다.
+업데이트 배포는 `docker compose up -d --build`를 직접 실행하지 않고 blue-green 스크립트로 수행한다. 일반 운영 배포에서는 GitHub Actions가 GitHub Release publish 이벤트를 받아 이 스크립트를 실행한다.
 
 ```bash
-git pull
 ./scripts/deploy-blue-green.sh
 ```
 

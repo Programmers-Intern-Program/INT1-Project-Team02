@@ -70,7 +70,7 @@ class RollingSummaryPersistenceServiceTest {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
-        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 12, 200));
+        given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances(meeting, 1, 8, 200));
 
         assertThat(service.prepareCompression(1L)).isEmpty();
     }
@@ -88,7 +88,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isNull();
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isNull();
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(15L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(23L);
         assertThat(candidate.userPrompt()).contains("content-1").doesNotContain("content-31");
         assertThat(candidate.userPrompt())
                 .contains("[출력]")
@@ -122,7 +122,7 @@ class RollingSummaryPersistenceServiceTest {
 
         assertThat(candidate.expectedVersion()).isEqualTo(3);
         assertThat(candidate.expectedCompressedUntilUtteranceId()).isEqualTo(5L);
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(20L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(28L);
         assertThat(candidate.userPrompt()).contains("previous summary");
         assertThat(candidate.nextVersion()).isEqualTo(4);
     }
@@ -146,10 +146,10 @@ class RollingSummaryPersistenceServiceTest {
         RollingSummaryPersistenceService.CompressionCandidate candidate =
                 service.prepareCompression(1L).orElseThrow();
 
-        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(17L);
+        assertThat(candidate.compressedUntilUtteranceId()).isEqualTo(25L);
         assertThat(candidate.userPrompt())
                 .contains("content-3")
-                .contains("content-17")
+                .contains("content-25")
                 .doesNotContain("content-33");
     }
 

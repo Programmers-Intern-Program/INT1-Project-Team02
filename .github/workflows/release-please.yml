@@ -2,7 +2,7 @@ name: Release Please
 
 on:
   push:
-    branches: [ dev ]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          target-branch: dev
+          target-branch: main
 
       - name: Discord 알림 (릴리즈 생성)
         if: ${{ steps.release.outputs.release_created }}

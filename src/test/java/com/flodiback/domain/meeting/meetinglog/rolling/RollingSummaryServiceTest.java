@@ -113,8 +113,8 @@ class RollingSummaryServiceTest {
 
         assertThat(progress.meetingId()).isEqualTo(1L);
         assertThat(progress.uncompressedTokens()).isZero();
-        assertThat(progress.thresholdTokens()).isEqualTo(2200);
-        assertThat(progress.remainingTokens()).isEqualTo(2200);
+        assertThat(progress.thresholdTokens()).isEqualTo(1100);
+        assertThat(progress.remainingTokens()).isEqualTo(1100);
         assertThat(progress.progressPercent()).isZero();
         assertThat(progress.remainingPercent()).isEqualTo(100);
         assertThat(progress.compressionTriggered()).isFalse();
@@ -124,12 +124,12 @@ class RollingSummaryServiceTest {
     void getProgress_returnsHalfProgress_beforeThreshold() {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         given(rollingSummaryPersistenceService.calculateUncompressedTokenCount(1L))
-                .willReturn(1100L);
+                .willReturn(550L);
 
         RollingSummaryProgress progress = service.getProgress(1L);
 
-        assertThat(progress.uncompressedTokens()).isEqualTo(1100);
-        assertThat(progress.remainingTokens()).isEqualTo(1100);
+        assertThat(progress.uncompressedTokens()).isEqualTo(550);
+        assertThat(progress.remainingTokens()).isEqualTo(550);
         assertThat(progress.progressPercent()).isEqualTo(50);
         assertThat(progress.remainingPercent()).isEqualTo(50);
         assertThat(progress.compressionTriggered()).isFalse();
@@ -139,7 +139,7 @@ class RollingSummaryServiceTest {
     void getProgress_marksCompressionTriggered_atThreshold() {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         given(rollingSummaryPersistenceService.calculateUncompressedTokenCount(1L))
-                .willReturn(2200L);
+                .willReturn(1100L);
 
         RollingSummaryProgress progress = service.getProgress(1L);
 
@@ -153,11 +153,11 @@ class RollingSummaryServiceTest {
     void getProgress_capsProgressAfterThreshold() {
         RollingSummaryService service = new RollingSummaryService(rollingSummaryPersistenceService, aiChatService);
         given(rollingSummaryPersistenceService.calculateUncompressedTokenCount(1L))
-                .willReturn(2300L);
+                .willReturn(1200L);
 
         RollingSummaryProgress progress = service.getProgress(1L);
 
-        assertThat(progress.uncompressedTokens()).isEqualTo(2300);
+        assertThat(progress.uncompressedTokens()).isEqualTo(1200);
         assertThat(progress.remainingTokens()).isZero();
         assertThat(progress.progressPercent()).isEqualTo(100);
         assertThat(progress.remainingPercent()).isZero();
