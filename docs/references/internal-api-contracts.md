@@ -2,6 +2,11 @@
 
 이 문서는 봇-백엔드 연동에 중요한 내부 API 계약을 기록합니다.
 
+## 시간대 기준
+- 서버의 기본 시간대, Jackson 직렬화, Hibernate JDBC 시간대는 UTC로 고정합니다.
+- `Z`가 붙은 timestamp는 UTC instant입니다. 프론트엔드는 화면 표시 시 사용자 로컬 시간대 또는 KST로 변환해 렌더링합니다.
+- zone 정보가 없는 `LocalDateTime` 필드는 UTC 기준 wall-clock 값으로 해석합니다.
+
 ## `POST /internal/v1/speech`
 Discord 봇 파이프라인에서 STT 변환 결과를 수신합니다.
 
