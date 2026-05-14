@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,7 @@ import com.flodiback.domain.project.project.dto.CreateProjectRequest;
 import com.flodiback.domain.project.project.dto.ProjectResponse;
 import com.flodiback.domain.project.project.dto.UpdateProjectRequest;
 import com.flodiback.domain.project.project.entity.Project;
+import com.flodiback.domain.project.project.event.ProjectCreatedEvent;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.server.server.entity.DiscordServer;
 import com.flodiback.domain.server.server.repository.DiscordServerRepository;
@@ -30,6 +32,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final DiscordServerRepository discordServerRepository;
     private final MeetingRepository meetingRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ProjectResponse create(CreateProjectRequest req) {
         if (req.channelId() != null) {
@@ -61,6 +64,8 @@ public class ProjectService {
                 .techStack(req.techStack())
                 .build();
         projectRepository.save(project);
+        eventPublisher.publishEvent(
+                new ProjectCreatedEvent(project.getId(), server != null ? server.getGuildId() : null));
 
         return toResponse(project, null);
     }
