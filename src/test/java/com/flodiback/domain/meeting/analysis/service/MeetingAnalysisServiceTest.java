@@ -178,6 +178,34 @@ class MeetingAnalysisServiceTest {
     }
 
     @Test
+    void analyze_acceptsUnresolvedItemsArrayFromAiResponse() throws Exception {
+        Project project = mockProject(10L);
+        Meeting meeting = Meeting.builder().project(project).title("meeting").build();
+        String aiResponse = """
+                {
+                  "summary": "summary",
+                  "unresolvedItems": [
+                    "비행기 및 배편 가격 확정",
+                    "   ",
+                    null,
+                    "렌터카 예약 여부 확인"
+                  ],
+                  "worklogs": [],
+                  "decisions": []
+                }
+                """;
+
+        givenAnalysisInputs(meeting, List.of(), aiResponse);
+
+        service.analyze(1L);
+
+        ArgumentCaptor<UpdateContextRequest> captor = ArgumentCaptor.forClass(UpdateContextRequest.class);
+        verify(meetingContextPersistenceService)
+                .saveSummaryRequired(org.mockito.ArgumentMatchers.eq(10L), captor.capture());
+        assertThat(captor.getValue().unresolvedItems()).isEqualTo("비행기 및 배편 가격 확정\n렌터카 예약 여부 확인");
+    }
+
+    @Test
     void analyze_assignsSpeakerKeysByFirstUtteranceIdAndFormatsPrompt() throws Exception {
         Project project = mockProject(10L);
         Meeting meeting = Meeting.builder().project(project).title("meeting").build();

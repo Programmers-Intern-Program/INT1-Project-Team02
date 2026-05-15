@@ -22,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.flodiback.domain.decision.decision.entity.Decision;
@@ -45,6 +46,7 @@ import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.event.WorkLogChangedEvent;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 import com.flodiback.global.exception.ServiceException;
@@ -84,6 +86,9 @@ class ContextServiceTest {
 
     @Mock
     private MeetingStartContextProvider meetingStartContextProvider;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private ContextService contextService;
@@ -304,6 +309,7 @@ class ContextServiceTest {
         assertThat(workLogCaptor.getAllValues())
                 .extracting(WorkLog::getAssigneeDiscordId)
                 .containsExactly("discord-alice", null);
+        verify(eventPublisher).publishEvent(new WorkLogChangedEvent(1L, 1L));
     }
 
     @Test
@@ -328,6 +334,7 @@ class ContextServiceTest {
 
         assertThat(workLog.getStatus()).isEqualTo("CANCELLED");
         verify(workLogRepository).save(workLog);
+        verify(eventPublisher).publishEvent(new WorkLogChangedEvent(1L, 1L));
     }
 
     @Test

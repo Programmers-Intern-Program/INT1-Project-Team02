@@ -177,6 +177,24 @@ Discord 서버 ID로 연결된 프로젝트를 조회합니다.
 ## `POST /internal/v1/meetings/{id}/worklogs`
 추출된 작업 로그를 저장합니다.
 
+## WorkLog WebSocket
+작업 로그가 생성되거나 상태가 변경되면 커밋 이후 프로젝트 작업 로그 변경 이벤트를 발행합니다.
+
+Topic:
+`/topic/projects/{projectId}/work-logs`
+
+Payload:
+```json
+{
+  "type": "worklog.changed",
+  "projectId": 1,
+  "meetingId": 10
+}
+```
+
+- 프론트엔드는 이 이벤트를 받으면 기존 `GET /api/v1/projects/{id}/work-logs`를 다시 호출해 현재 필터에 맞는 목록을 갱신합니다.
+- 작업 로그 변경이 없는 컨텍스트 저장은 이벤트를 발행하지 않습니다.
+
 ## 변경 규칙
 - 계약이 바뀌면 이 문서를 반드시 갱신하고 실행 계획 문서에 변경 내역을 남깁니다.
 - 하위 호환이 깨지는 변경은 마이그레이션 절차와 봇 연동 조정 사항을 함께 기록합니다.
