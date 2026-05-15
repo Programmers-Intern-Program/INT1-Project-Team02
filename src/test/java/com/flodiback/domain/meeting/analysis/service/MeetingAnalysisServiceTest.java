@@ -29,6 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flodiback.domain.ai.service.AiChatService;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
 import com.flodiback.domain.meeting.meeting.entity.ContextCache;
 import com.flodiback.domain.meeting.meeting.entity.Meeting;
@@ -42,7 +43,6 @@ import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository.Sp
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
-import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
 @ExtendWith(MockitoExtension.class)
@@ -67,7 +67,7 @@ class MeetingAnalysisServiceTest {
     private MeetingContextPersistenceService meetingContextPersistenceService;
 
     @Mock
-    private GlmClient glmClient;
+    private AiChatService aiChatService;
 
     @Mock(name = "objectMapper")
     private ObjectMapper objectMapper;
@@ -189,7 +189,7 @@ class MeetingAnalysisServiceTest {
         service.analyze(1L);
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateSummary(anyString(), userPromptCaptor.capture());
         assertThat(userPromptCaptor.getValue())
                 .contains("[speaker=S1, name=Bob] I can do API.")
                 .contains("[speaker=S2, name=Alice] I can test it.")
@@ -235,14 +235,14 @@ class MeetingAnalysisServiceTest {
                 .willReturn(Optional.empty());
         given(utteranceRepository.findDistinctSpeakersByMeeting(meeting)).willReturn(List.of());
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(List.of(utterance));
-        given(glmClient.chat(anyString(), anyString())).willReturn(emptyAnalysisJson());
+        given(aiChatService.generateSummary(anyString(), anyString())).willReturn(emptyAnalysisJson());
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
 
         service.analyze(1L);
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateSummary(anyString(), userPromptCaptor.capture());
         assertThat(userPromptCaptor.getValue()).contains("[speaker=unknown, name=Guest] I will check it.");
     }
 
@@ -296,14 +296,14 @@ class MeetingAnalysisServiceTest {
                 .willReturn(List.of(speaker("user-11", "Alice", 11L)));
         given(utteranceRepository.findByMeetingAndIdGreaterThanOrderByIdAsc(meeting, 10L))
                 .willReturn(List.of(later));
-        given(glmClient.chat(anyString(), anyString())).willReturn(emptyAnalysisJson());
+        given(aiChatService.generateSummary(anyString(), anyString())).willReturn(emptyAnalysisJson());
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
 
         service.analyze(1L);
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateSummary(anyString(), userPromptCaptor.capture());
         String userPrompt = userPromptCaptor.getValue();
         assertThat(userPrompt).contains("latest summary");
         assertThat(userPrompt).doesNotContain("old summary");
@@ -323,7 +323,7 @@ class MeetingAnalysisServiceTest {
         service.analyze(1L);
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateSummary(anyString(), userPromptCaptor.capture());
         assertThat(userPromptCaptor.getValue()).containsSubsequence("first", "second");
     }
 
@@ -377,7 +377,7 @@ class MeetingAnalysisServiceTest {
         service.analyze(1L);
 
         ArgumentCaptor<String> userPromptCaptor = ArgumentCaptor.forClass(String.class);
-        verify(glmClient).chat(anyString(), userPromptCaptor.capture());
+        verify(aiChatService).generateSummary(anyString(), userPromptCaptor.capture());
         assertThat(userPromptCaptor.getValue())
                 .contains("[프로젝트 기존 작업 항목]")
                 .contains("ID:7")
@@ -403,13 +403,13 @@ class MeetingAnalysisServiceTest {
                 .willReturn(Optional.empty());
         given(utteranceRepository.findDistinctSpeakersByMeeting(meeting)).willReturn(List.of());
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(List.of());
-        given(glmClient.chat(anyString(), anyString())).willReturn("not json");
+        given(aiChatService.generateSummary(anyString(), anyString())).willReturn("not json");
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
 
         assertThatThrownBy(() -> service.analyze(1L))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("GLM 응답 파싱 실패");
+                .hasMessageContaining("AI 응답 파싱 실패");
     }
 
     @Test
@@ -422,13 +422,13 @@ class MeetingAnalysisServiceTest {
                 .hasMessageContaining("회의에 연결된 프로젝트가 없습니다.");
     }
 
-    private void givenAnalysisInputs(Meeting meeting, List<Utterance> utterances, String glmResponse) throws Exception {
+    private void givenAnalysisInputs(Meeting meeting, List<Utterance> utterances, String aiResponse) throws Exception {
         given(meetingRepository.findById(1L)).willReturn(Optional.of(meeting));
         given(contextCacheRepository.findTopByMeetingOrderByVersionDesc(meeting))
                 .willReturn(Optional.empty());
         given(utteranceRepository.findDistinctSpeakersByMeeting(meeting)).willReturn(speakersFrom(utterances));
         given(utteranceRepository.findByMeetingOrderByIdAsc(meeting)).willReturn(utterances);
-        given(glmClient.chat(anyString(), anyString())).willReturn(glmResponse);
+        given(aiChatService.generateSummary(anyString(), anyString())).willReturn(aiResponse);
         given(objectMapper.readValue(anyString(), any(Class.class)))
                 .willAnswer(inv -> realMapper.readValue((String) inv.getArgument(0), AnalysisResult.class));
     }
