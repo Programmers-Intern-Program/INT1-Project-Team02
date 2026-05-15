@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Programmers-Intern-Program/INT1-Project-Team02/compare/v0.2.0...v0.2.1) (2026-05-15)
+
+
+### 🐛 버그 수정
+
+* 회의 분석 파싱 및 작업 로그 갱신 이벤트 수정 ([7531741](https://github.com/Programmers-Intern-Program/INT1-Project-Team02/commit/7531741e206253d5351f2e514d5206110c423819))
+
 ## [0.2.0](https://github.com/Programmers-Intern-Program/INT1-Project-Team02/compare/v0.1.0...v0.2.0) (2026-05-14)
 
 
