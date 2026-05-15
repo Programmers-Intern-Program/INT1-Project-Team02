@@ -20,6 +20,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flodiback.domain.ai.service.AiChatService;
 import com.flodiback.domain.meeting.analysis.dto.AnalysisResult;
 import com.flodiback.domain.meeting.analysis.dto.DecisionItem;
 import com.flodiback.domain.meeting.analysis.dto.WorkLogItem;
@@ -37,7 +38,6 @@ import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository.Sp
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
-import com.flodiback.global.client.GlmClient;
 import com.flodiback.global.exception.ServiceException;
 
 import jakarta.annotation.PostConstruct;
@@ -68,7 +68,7 @@ public class MeetingAnalysisService {
     private final UtteranceRepository utteranceRepository;
     private final WorkLogRepository workLogRepository;
     private final MeetingContextPersistenceService meetingContextPersistenceService;
-    private final GlmClient glmClient;
+    private final AiChatService aiChatService;
     private final ObjectMapper objectMapper;
 
     @Async("analysisExecutor")
@@ -93,10 +93,8 @@ public class MeetingAnalysisService {
         SpeakerDirectory speakerDirectory = buildSpeakerDirectory(meeting);
         // 프로젝트의 기존 작업 로그 조회 (상태 변경 감지용)
         List<WorkLog> existingWorkLogs = workLogRepository.findByProjectIdOrderByCreatedAtDesc(project.getId());
-        // GLM prompt context 생성
         String context = buildContext(meeting, speakerDirectory, existingWorkLogs);
-        // GLM 응답 - GLM은 이름 대신 speaker key 반환
-        AnalysisResult result = callGlm(context);
+        AnalysisResult result = callAi(context);
         UpdateContextRequest request =
                 toUpdateContextRequest(meeting.getId(), result, speakerDirectory, existingWorkLogs);
 
@@ -291,9 +289,9 @@ public class MeetingAnalysisService {
                 .toList();
     }
 
-    private AnalysisResult callGlm(String context) {
+    private AnalysisResult callAi(String context) {
         String prompt = systemPrompt.replace("{today}", LocalDate.now().toString());
-        String raw = glmClient.chat(prompt, context);
+        String raw = aiChatService.generateSummary(prompt, context);
         String json = raw.strip()
                 .replaceAll("^```json\\s*", "")
                 .replaceAll("^```\\s*", "")
@@ -302,7 +300,7 @@ public class MeetingAnalysisService {
         try {
             return objectMapper.readValue(json, AnalysisResult.class);
         } catch (Exception e) {
-            throw new RuntimeException("GLM 응답 파싱 실패: " + raw, e);
+            throw new RuntimeException("AI 응답 파싱 실패: " + raw, e);
         }
     }
 
