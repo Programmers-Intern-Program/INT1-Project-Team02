@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -37,6 +38,7 @@ import com.flodiback.domain.meeting.meetinglog.service.MeetingSummaryEmbeddingSe
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.event.WorkLogChangedEvent;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.exception.ServiceException;
 
@@ -65,6 +67,9 @@ class MeetingContextPersistenceServiceTest {
     private MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
 
     @Mock
+    private ApplicationEventPublisher eventPublisher;
+
+    @Mock
     private PlatformTransactionManager transactionManager;
 
     private MeetingContextPersistenceService service;
@@ -79,6 +84,7 @@ class MeetingContextPersistenceServiceTest {
                 decisionRepository,
                 decisionEmbeddingService,
                 meetingSummaryEmbeddingService,
+                eventPublisher,
                 transactionManager);
     }
 
@@ -149,6 +155,7 @@ class MeetingContextPersistenceServiceTest {
         assertThat(workLogCaptor.getAllValues())
                 .extracting(WorkLog::getAssigneeDiscordId)
                 .containsExactly("discord-alice", null);
+        verify(eventPublisher).publishEvent(new WorkLogChangedEvent(1L, 10L));
     }
 
     @Test
@@ -167,6 +174,22 @@ class MeetingContextPersistenceServiceTest {
 
         assertThat(workLog.getStatus()).isEqualTo("DONE");
         verify(workLogRepository).save(workLog);
+        verify(eventPublisher).publishEvent(new WorkLogChangedEvent(1L, 10L));
+    }
+
+    @Test
+    void saveDerivedItemsBestEffort_doesNotPublishWorkLogEventWithoutWorkLogChanges() {
+        Project project = project(1L);
+        Meeting meeting = meeting(project);
+        UpdateContextRequest req = new UpdateContextRequest(10L, "summary", null, List.of("decision"), null, null);
+        given(projectRepository.findById(1L)).willReturn(Optional.of(project));
+        given(meetingRepository.findById(10L)).willReturn(Optional.of(meeting));
+        given(decisionRepository.save(any(Decision.class))).willAnswer(invocation -> invocation.getArgument(0));
+        stubNewTransaction();
+
+        service.saveDerivedItemsBestEffort(1L, req);
+
+        verify(eventPublisher, never()).publishEvent(any(WorkLogChangedEvent.class));
     }
 
     @Test
