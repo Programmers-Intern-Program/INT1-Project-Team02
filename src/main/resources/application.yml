@@ -62,7 +62,7 @@ ai:
   provider: ${AI_PROVIDER:}
 
 openai:
-  api-key: ${OPENAI_API_KEY}
+  api-key: ${OPENAI_EMBEDDING_API_KEY}
   chat:
     model: ${OPENAI_CHAT_MODEL:gpt-4o-mini}
     base-url: ${OPENAI_CHAT_BASE_URL:https://api.openai.com/v1}
