@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,7 @@ import com.flodiback.domain.meeting.meetinglog.repository.UtteranceRepository;
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.event.WorkLogChangedEvent;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.embedding.OpenAiEmbeddingClient;
 import com.flodiback.global.exception.ServiceException;
@@ -65,6 +67,7 @@ public class ContextService {
     private final DecisionEmbeddingService decisionEmbeddingService;
     private final MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
     private final MeetingStartContextProvider meetingStartContextProvider;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ContextResponse assemble(Long meetingId, String question) {
         Meeting meeting = meetingRepository
@@ -185,25 +188,35 @@ public class ContextService {
             });
         }
 
+        boolean workLogsChanged = false;
         if (req.actionItems() != null) {
-            req.actionItems()
-                    .forEach(item -> workLogRepository.save(WorkLog.builder()
-                            .meeting(meeting)
-                            .project(project)
-                            .assigneeName(item.assigneeName())
-                            .assigneeDiscordId(item.assigneeDiscordId())
-                            .task(item.task())
-                            .dueDate(item.dueDate())
-                            .build()));
+            for (var item : req.actionItems()) {
+                workLogRepository.save(WorkLog.builder()
+                        .meeting(meeting)
+                        .project(project)
+                        .assigneeName(item.assigneeName())
+                        .assigneeDiscordId(item.assigneeDiscordId())
+                        .task(item.task())
+                        .dueDate(item.dueDate())
+                        .build());
+                workLogsChanged = true;
+            }
         }
 
         if (req.worklogUpdates() != null) {
-            req.worklogUpdates().forEach(update -> workLogRepository
-                    .findByIdAndProjectId(update.id(), projectId)
-                    .ifPresent(wl -> {
-                        wl.updateStatus(update.status());
-                        workLogRepository.save(wl);
-                    }));
+            for (var update : req.worklogUpdates()) {
+                var workLog = workLogRepository.findByIdAndProjectId(update.id(), projectId);
+                if (workLog.isPresent()) {
+                    WorkLog wl = workLog.get();
+                    wl.updateStatus(update.status());
+                    workLogRepository.save(wl);
+                    workLogsChanged = true;
+                }
+            }
+        }
+
+        if (workLogsChanged) {
+            eventPublisher.publishEvent(new WorkLogChangedEvent(projectId, req.meetingId()));
         }
     }
 

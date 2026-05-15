@@ -1,5 +1,6 @@
 package com.flodiback.domain.meeting.analysis.service;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -19,6 +20,7 @@ import com.flodiback.domain.meeting.meetinglog.service.MeetingSummaryEmbeddingSe
 import com.flodiback.domain.project.project.entity.Project;
 import com.flodiback.domain.project.project.repository.ProjectRepository;
 import com.flodiback.domain.project.worklog.entity.WorkLog;
+import com.flodiback.domain.project.worklog.event.WorkLogChangedEvent;
 import com.flodiback.domain.project.worklog.repository.WorkLogRepository;
 import com.flodiback.global.exception.ServiceException;
 
@@ -35,6 +37,7 @@ public class MeetingContextPersistenceService {
     private final DecisionRepository decisionRepository;
     private final DecisionEmbeddingService decisionEmbeddingService;
     private final MeetingSummaryEmbeddingService meetingSummaryEmbeddingService;
+    private final ApplicationEventPublisher eventPublisher;
     private final TransactionTemplate derivedItemsTransactionTemplate;
 
     public MeetingContextPersistenceService(
@@ -45,6 +48,7 @@ public class MeetingContextPersistenceService {
             DecisionRepository decisionRepository,
             DecisionEmbeddingService decisionEmbeddingService,
             MeetingSummaryEmbeddingService meetingSummaryEmbeddingService,
+            ApplicationEventPublisher eventPublisher,
             PlatformTransactionManager transactionManager) {
         this.meetingRepository = meetingRepository;
         this.meetingSummaryRepository = meetingSummaryRepository;
@@ -53,6 +57,7 @@ public class MeetingContextPersistenceService {
         this.decisionRepository = decisionRepository;
         this.decisionEmbeddingService = decisionEmbeddingService;
         this.meetingSummaryEmbeddingService = meetingSummaryEmbeddingService;
+        this.eventPublisher = eventPublisher;
         this.derivedItemsTransactionTemplate = new TransactionTemplate(transactionManager);
         this.derivedItemsTransactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -110,29 +115,38 @@ public class MeetingContextPersistenceService {
             });
         }
 
+        boolean workLogsChanged = false;
         if (req.actionItems() != null) {
-            req.actionItems()
-                    .forEach(item -> workLogRepository.save(WorkLog.builder()
-                            .meeting(meeting)
-                            .project(project)
-                            .assigneeName(item.assigneeName())
-                            .assigneeDiscordId(item.assigneeDiscordId())
-                            .task(item.task())
-                            .dueDate(item.dueDate())
-                            .build()));
+            for (var item : req.actionItems()) {
+                workLogRepository.save(WorkLog.builder()
+                        .meeting(meeting)
+                        .project(project)
+                        .assigneeName(item.assigneeName())
+                        .assigneeDiscordId(item.assigneeDiscordId())
+                        .task(item.task())
+                        .dueDate(item.dueDate())
+                        .build());
+                workLogsChanged = true;
+            }
         }
 
         if (req.worklogUpdates() != null) {
-            req.worklogUpdates().forEach(update -> workLogRepository
-                    .findByIdAndProjectId(update.id(), projectId)
-                    .ifPresent(wl -> {
-                        wl.updateStatus(update.status());
-                        workLogRepository.save(wl);
-                    }));
+            for (var update : req.worklogUpdates()) {
+                var workLog = workLogRepository.findByIdAndProjectId(update.id(), projectId);
+                if (workLog.isPresent()) {
+                    WorkLog wl = workLog.get();
+                    wl.updateStatus(update.status());
+                    workLogRepository.save(wl);
+                    workLogsChanged = true;
+                }
+            }
         }
 
         decisionRepository.flush();
         workLogRepository.flush();
+        if (workLogsChanged) {
+            eventPublisher.publishEvent(new WorkLogChangedEvent(projectId, req.meetingId()));
+        }
     }
 
     private Meeting findMeetingInProject(Long projectId, Long meetingId) {
